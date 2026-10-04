@@ -671,6 +671,172 @@ final class InstallerTest extends TestCase
         return [['config/shared.php'], ['phpstan.neon.dist']];
     }
 
+    public function test_selected_neon_policies_resolving_to_the_same_existing_file_conflict_before_composer(): void
+    {
+        $contents = "parameters:\n    level: 7\n";
+        file_put_contents($this->root.'/shared.neon', $contents);
+        foreach (['first', 'second'] as $name) {
+            $default = $name.'.neon';
+            $metadata = "dependencies:\n  development: [example/quality-tool]\nneon_updates:\n  {$default}:\n    candidates: [{$default}, shared.neon]\n    set: {parameters.level: 10}\n";
+            $this->configurationItem($name, [$default => "parameters:\n    level: 10\n"], $metadata);
+        }
+        $before = $this->snapshot();
+
+        foreach ([false, true] as $dryRun) {
+            $report = $this->installer()->install($this->root, ['first', 'second'], $dryRun);
+
+            self::assertFalse($report->successful());
+            self::assertCount(1, $report->conflicts);
+            self::assertStringContainsString('shared.neon: selected items first and second both target', $report->conflicts[0]);
+            self::assertSame($before, $this->snapshot());
+        }
+        self::assertSame([], $this->commands);
+        self::assertSame([], $this->boostCalls);
+    }
+
+    public function test_another_item_cannot_claim_a_resolved_neon_candidate_before_composer(): void
+    {
+        $this->configurationItem('first', ['shared.neon' => "parameters:\n    level: 7\n"]);
+        self::assertTrue($this->installer()->install($this->root, ['first'])->successful());
+        $this->boostCalls = [];
+        $metadata = "dependencies:\n  development: [example/quality-tool]\nneon_updates:\n  custom.neon:\n    candidates: [custom.neon, shared.neon]\n    set: {parameters.level: 10}\n";
+        $this->configurationItem('second', ['custom.neon' => "parameters:\n    level: 10\n"], $metadata);
+        $before = $this->snapshot();
+
+        foreach ([false, true] as $dryRun) {
+            $report = $this->installer()->install($this->root, ['second'], $dryRun);
+
+            self::assertFalse($report->successful());
+            self::assertCount(1, $report->conflicts);
+            self::assertStringContainsString('shared.neon: managed by item first', $report->conflicts[0]);
+            self::assertSame($before, $this->snapshot());
+        }
+        self::assertSame([], $this->commands);
+        self::assertSame([], $this->boostCalls);
+    }
+
+    public function test_preferred_neon_candidate_symlinks_fail_before_composer_without_falling_back(): void
+    {
+        $metadata = "dependencies:\n  development: [example/quality-tool]\nneon_updates:\n  custom.neon:\n    candidates: [custom.neon, shared.neon]\n    set: {parameters.level: 10}\n";
+        $this->configurationItem('quality', ['custom.neon' => "parameters:\n    level: 10\n"], $metadata);
+        file_put_contents($this->root.'/shared.neon', "parameters:\n    level: 7\n");
+        symlink($this->root.'/composer.json', $this->root.'/custom.neon');
+        $before = $this->snapshot();
+
+        foreach ([false, true] as $dryRun) {
+            $report = $this->installer()->install($this->root, ['quality'], $dryRun);
+
+            self::assertFalse($report->successful());
+            self::assertStringContainsString('Refusing symlink', $report->failures[0]);
+            self::assertSame($before, $this->snapshot());
+        }
+        self::assertSame([], $this->commands);
+        self::assertSame([], $this->boostCalls);
+    }
+
+    public function test_fresh_selected_neon_policies_keep_distinct_defaults_when_candidates_are_reversed(): void
+    {
+        $firstContents = "parameters:\n    level: 10\n";
+        $secondContents = "parameters:\n    level: 8\n";
+        $this->configurationItem('first', ['first.neon' => $firstContents], "neon_updates:\n  first.neon:\n    candidates: [first.neon, second.neon]\n    set: {parameters.level: 10}\n");
+        $this->configurationItem('second', ['second.neon' => $secondContents], "neon_updates:\n  second.neon:\n    candidates: [second.neon, first.neon]\n    set: {parameters.level: 8}\n");
+        $before = $this->snapshot();
+        $preview = $this->installer()->install($this->root, ['first', 'second'], true);
+
+        self::assertTrue($preview->successful(), implode("\n", array_merge($preview->failures, $preview->conflicts)));
+        self::assertSame(['first.neon (installed)', 'second.neon (installed)'], $preview->files);
+        self::assertSame($before, $this->snapshot());
+
+        $installed = $this->installer()->install($this->root, ['first', 'second']);
+
+        self::assertTrue($installed->successful(), implode("\n", array_merge($installed->failures, $installed->conflicts)));
+        self::assertSame(['first.neon (installed)', 'second.neon (installed)'], $installed->files);
+        self::assertSame($firstContents, file_get_contents($this->root.'/first.neon'));
+        self::assertSame($secondContents, file_get_contents($this->root.'/second.neon'));
+        $state = json_decode(file_get_contents($this->root.'/.ai/laracanon/state.json'), true);
+        self::assertSame('first', $state['files']['first.neon']['owner']);
+        self::assertSame('second', $state['files']['second.neon']['owner']);
+        self::assertSame([], $this->commands);
+    }
+
+    public function test_fresh_neon_policies_in_one_item_do_not_patch_each_others_new_defaults(): void
+    {
+        $firstContents = "parameters:\n    level: 10\n";
+        $secondContents = "parameters:\n    level: 8\n";
+        $metadata = "neon_updates:\n  first.neon:\n    candidates: [first.neon, second.neon]\n    set: {parameters.level: 10}\n  second.neon:\n    candidates: [second.neon, first.neon]\n    set: {parameters.level: 8}\n";
+        $this->configurationItem('quality', ['first.neon' => $firstContents, 'second.neon' => $secondContents], $metadata);
+        $before = $this->snapshot();
+        $preview = $this->installer()->install($this->root, ['quality'], true);
+
+        self::assertTrue($preview->successful(), implode("\n", array_merge($preview->failures, $preview->conflicts)));
+        self::assertSame(['first.neon (installed)', 'second.neon (installed)'], $preview->files);
+        self::assertSame($before, $this->snapshot());
+
+        $installed = $this->installer()->install($this->root, ['quality']);
+
+        self::assertTrue($installed->successful(), implode("\n", array_merge($installed->failures, $installed->conflicts)));
+        self::assertSame(['first.neon (installed)', 'second.neon (installed)'], $installed->files);
+        self::assertSame($firstContents, file_get_contents($this->root.'/first.neon'));
+        self::assertSame($secondContents, file_get_contents($this->root.'/second.neon'));
+        $state = json_decode(file_get_contents($this->root.'/.ai/laracanon/state.json'), true);
+        self::assertSame(['first.neon', 'second.neon'], $state['items']['quality']['files']);
+        self::assertSame([], $this->commands);
+    }
+
+    public function test_neon_destination_is_refreshed_after_a_composer_script_creates_a_preferred_config(): void
+    {
+        $this->configurationItem('quality', ['first.neon' => "parameters:\n    level: 10\n"], "dependencies:\n  development: [example/quality-tool]\nneon_updates:\n  first.neon:\n    candidates: [first.neon, second.neon]\n    set: {parameters.level: 10}\n");
+        $fallback = "parameters:\n    level: 7\n";
+        $preferred = "# Created by the application Composer workflow.\nparameters:\n    level: 6\n";
+        file_put_contents($this->root.'/second.neon', $fallback);
+        $this->process = function () use ($preferred) {
+            $this->addPackage('example/quality-tool');
+            file_put_contents($this->root.'/first.neon', $preferred);
+
+            return new ProcessResult(0, 'installed');
+        };
+
+        $report = $this->installer()->install($this->root, ['quality']);
+
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        self::assertSame(['first.neon (updated)'], $report->files);
+        self::assertSame(str_replace('level: 6', 'level: 10', $preferred), file_get_contents($this->root.'/first.neon'));
+        self::assertSame($fallback, file_get_contents($this->root.'/second.neon'));
+        self::assertCount(1, $this->commands);
+    }
+
+    public function test_fresh_neon_default_applies_declared_updates_and_retains_its_previous_included_configuration(): void
+    {
+        $old = "parameters:\n    paths: [app/Legacy]\n";
+        $this->configurationItem('quality', ['old.neon' => $old]);
+        self::assertTrue($this->installer()->install($this->root, ['quality'])->successful());
+        $literal = "includes:\n    - old.neon\n\nparameters:\n    level: 7 # Source default before declared updates.\n";
+        $metadata = "neon_updates:\n  new.neon:\n    candidates: [new.neon]\n    set: {parameters.level: 10}\n";
+        $this->configurationItem('quality', ['new.neon' => $literal], $metadata);
+        $before = $this->snapshot();
+
+        $preview = $this->installer()->install($this->root, ['quality'], true);
+
+        self::assertTrue($preview->successful(), implode("\n", array_merge($preview->failures, $preview->conflicts)));
+        self::assertStringContainsString('old.neon: included or potentially referenced configuration preserved.', implode("\n", $preview->notes));
+        self::assertSame($before, $this->snapshot());
+
+        $installed = $this->installer()->install($this->root, ['quality']);
+
+        self::assertTrue($installed->successful(), implode("\n", array_merge($installed->failures, $installed->conflicts)));
+        self::assertSame(['new.neon (installed)'], $installed->files);
+        self::assertSame(str_replace('level: 7', 'level: 10', $literal), file_get_contents($this->root.'/new.neon'));
+        self::assertSame($old, file_get_contents($this->root.'/old.neon'));
+        $beforeRepeat = $this->snapshot();
+
+        $repeat = $this->installer()->install($this->root, ['quality']);
+
+        self::assertTrue($repeat->successful(), implode("\n", array_merge($repeat->failures, $repeat->conflicts)));
+        self::assertSame(['new.neon (unchanged)'], $repeat->files);
+        self::assertSame($beforeRepeat, $this->snapshot());
+        self::assertSame([], $this->commands);
+    }
+
     public function test_root_neon_installation_repeats_updates_and_preserves_edits_when_the_source_is_retired(): void
     {
         $initial = "parameters:\n    level: 6\n";

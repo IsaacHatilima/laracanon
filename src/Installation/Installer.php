@@ -42,11 +42,12 @@ final class Installer
             // Validate ownership state before Composer or any other mutation.
             $this->progress?->stage('Checking compatibility and managed files');
             $files = new ManagedFiles($project, $dryRun);
+            $resolvedPaths = [];
             $items = $this->compatibleItems($items, $project, $dryRun, $report);
             if ($items === []) {
                 return $report;
             }
-            if (! $this->validateOutputs($items, $files, $report)) {
+            if (! $this->validateOutputs($items, $files, $report, $resolvedPaths)) {
                 return $report;
             }
             $lockPath = $files->lockPath();
@@ -61,7 +62,7 @@ final class Installer
                 }
                 // Re-read after taking the lock.
                 $files = new ManagedFiles($project, false);
-                if (! $this->validateOutputs($items, $files, $report)) {
+                if (! $this->validateOutputs($items, $files, $report, $resolvedPaths)) {
                     return $report;
                 }
             }
@@ -80,6 +81,12 @@ final class Installer
             array_push($report->failures, ...$dependencyResult['failures']);
             array_push($report->notes, ...$dependencyResult['notes']);
             $available = $dependencyResult['available'];
+            // Composer scripts may create a preferred configuration. Resolve
+            // once more, then keep these destinations stable across item writes.
+            $this->progress?->stage('Checking managed files after dependency installation');
+            if (! $this->validateOutputs($items, $files, $report, $resolvedPaths)) {
+                return $report;
+            }
             $this->progress?->stage('Discovering package skills');
             $packageSkills = $this->boost->packageSkillNames($project);
 
@@ -131,10 +138,31 @@ final class Installer
                             }
                         }
                     }
-                    foreach ($item->files as $path => $contents) {
+                    foreach ($item->files as $defaultPath => $contents) {
+                        $policy = $item->neonUpdates[$defaultPath] ?? null;
+                        $path = $resolvedPaths[$item->name][$defaultPath];
                         $desired[] = $path;
-                        if ($this->write($files, $path, $contents, $item->name, 'files', $report)) {
+                        $existing = $policy !== null && $files->exists($path);
+                        if ($policy !== null && ! $existing) {
+                            $contents = (new NeonPatcher)->patch($contents, $policy['set']);
+                        }
+                        $written = $existing
+                            ? $this->writeNeon($files, $path, $policy['set'], $item->name, $report)
+                            : $this->write($files, $path, $contents, $item->name, 'files', $report);
+                        if ($written) {
                             $managed[] = $path;
+                        } elseif ($policy !== null) {
+                            // A replacement conflict must not retire the prior configuration.
+                            array_push($desired, ...array_intersect($previousFiles, $policy['candidates']));
+                        }
+                        if ($policy !== null && ($written || $files->exists($path))) {
+                            $plannedContents = $files->exists($path) ? null : $contents;
+                            foreach ($files->retainedNeonIncludes($path, $previousFiles, $plannedContents) as $retained) {
+                                if (! in_array($retained, $desired, true)) {
+                                    $desired[] = $retained;
+                                    $report->notes[] = "{$retained}: included or potentially referenced configuration preserved.";
+                                }
+                            }
                         }
                     }
                     foreach ($previousFiles as $previous) {
@@ -149,6 +177,8 @@ final class Installer
                                 $managed = array_values(array_diff($managed, [$previous]));
                                 if ($result === 'removed') {
                                     $report->notes[] = "{$previous}: removed retired managed file.";
+                                } elseif ($result === 'released') {
+                                    $report->notes[] = "{$previous}: retired adopted configuration preserved; managed settings released.";
                                 }
                             }
                         }
@@ -262,9 +292,26 @@ final class Installer
         }
     }
 
-    private function validateOutputs(array $items, ManagedFiles $files, InstallReport $report): bool
+    /** @param array<string, int|string|bool|float|null> $updates */
+    private function writeNeon(ManagedFiles $files, string $path, array $updates, string $owner, InstallReport $report): bool
+    {
+        $result = $files->updateNeon($path, $updates, $owner);
+        if ($result === 'conflict') {
+            $report->conflicts[] = "{$path}: locally modified managed NEON settings or configuration preserved.";
+
+            return false;
+        }
+
+        $report->files[] = "{$path} ({$result})";
+
+        return true;
+    }
+
+    /** @param array<string, array<string, string>> $resolvedPaths */
+    private function validateOutputs(array $items, ManagedFiles $files, InstallReport $report, array &$resolvedPaths): bool
     {
         $selectedOwners = [];
+        $resolvedPaths = [];
         foreach ($items as $item) {
             $paths = [];
             if ($item->rules !== null) {
@@ -273,11 +320,20 @@ final class Installer
             if ($item->skill !== null) {
                 $paths[] = '.ai/skills/'.$item->skillName.'/SKILL.md';
             }
-            array_push($paths, ...array_keys($item->files));
+            foreach (array_keys($item->files) as $defaultPath) {
+                $policy = $item->neonUpdates[$defaultPath] ?? null;
+                $path = $policy === null ? $defaultPath : $files->resolveNeonPath($policy['candidates']);
+                $paths[] = $path;
+                $resolvedPaths[$item->name][$defaultPath] = $path;
+            }
 
             foreach ($paths as $path) {
-                if (isset($selectedOwners[$path]) && $selectedOwners[$path] !== $item->name) {
-                    $report->conflicts[] = "{$path}: selected items {$selectedOwners[$path]} and {$item->name} both target this file; select distinct output destinations.";
+                if (isset($selectedOwners[$path])) {
+                    if ($selectedOwners[$path] === $item->name) {
+                        $report->conflicts[] = "{$path}: item {$item->name} targets this file through multiple output destinations; declare distinct configurations.";
+                    } else {
+                        $report->conflicts[] = "{$path}: selected items {$selectedOwners[$path]} and {$item->name} both target this file; select distinct output destinations.";
+                    }
                 }
                 $selectedOwners[$path] = $item->name;
                 $owner = $files->owner($path);

@@ -17,6 +17,7 @@ use Laravel\Boost\BoostServiceProvider;
 use Laravel\Boost\Rules\RuleFrontmatter;
 use Laravel\Roster\ProjectManager;
 use Orchestra\Testbench\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 final class CatalogInstallationTest extends TestCase
 {
@@ -206,7 +207,7 @@ final class CatalogInstallationTest extends TestCase
         self::assertSame(['config', 'config', 'require'], array_column($this->commands, 1));
         self::assertSame(['nunomaduro/phpinsights:*@stable', 'phpstan/phpstan:*@stable', 'larastan/larastan:*@stable'], $this->packageArguments($this->commands[2]));
         self::assertContains('--dev', $this->commands[2]);
-        self::assertSame(['config/insights.php (installed)', 'phpstan.neon.dist (installed)'], $report->files);
+        self::assertSame(['config/insights.php (installed)', 'phpstan.neon (installed)'], $report->files);
         self::assertFileExists($this->project.'/.ai/rules/index.md');
         self::assertSame(['post-update-cmd' => ['@php artisan existing:workflow']], json_decode($this->read('composer.json'), true)['scripts']);
     }
@@ -231,7 +232,6 @@ parameters:
 NEON;
         $this->simulateDependencyInstall('nesbot/carbon', 'runtime', '^3.10', '3.14.2');
         $existingRequirements = json_decode($this->read('composer.json'), true)['require'];
-        $this->write('phpstan.neon', "parameters:\n    level: 6\n");
         $report = $this->installer()->install($this->project, ['phpstan']);
 
         self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
@@ -242,9 +242,10 @@ NEON;
         self::assertSame($existingRequirements, $composer['require']);
         self::assertSame(['laravel/boost' => '^2.10', 'phpstan/phpstan' => '*@stable', 'larastan/larastan' => '*@stable'], $composer['require-dev']);
         self::assertSame(['post-update-cmd' => ['@php artisan existing:workflow']], $composer['scripts']);
-        self::assertSame($expected."\n", $this->read('phpstan.neon.dist'));
-        self::assertSame("parameters:\n    level: 6\n", $this->read('phpstan.neon'), 'An existing local PHPStan configuration retains precedence.');
-        self::assertSame(['phpstan.neon.dist (installed)'], $report->files);
+        self::assertSame($expected."\n", $this->read('phpstan.neon'));
+        self::assertFileDoesNotExist($this->project.'/phpstan.neon.dist');
+        self::assertFileDoesNotExist($this->project.'/phpstan.dist.neon');
+        self::assertSame(['phpstan.neon (installed)'], $report->files);
         self::assertSame([], $report->rules);
         self::assertSame([], $report->skills);
         self::assertFileDoesNotExist($this->project.'/.ai/rules/laracanon-phpstan.md');
@@ -252,7 +253,7 @@ NEON;
         self::assertStringContainsString('| **/* | .ai/rules/project-global.md |', $this->read('.ai/rules/index.md'));
         self::assertStringNotContainsString('laracanon-phpstan.md', $this->read('.ai/rules/index.md'));
         $state = json_decode($this->read('.ai/laracanon/state.json'), true);
-        self::assertSame(['hash' => hash('sha256', $expected."\n"), 'owner' => 'phpstan'], $state['files']['phpstan.neon.dist']);
+        self::assertSame(['hash' => hash('sha256', $expected."\n"), 'owner' => 'phpstan'], $state['files']['phpstan.neon']);
         $before = $this->snapshot();
 
         $repeat = $this->installer()->install($this->project, ['phpstan']);
@@ -260,10 +261,10 @@ NEON;
         self::assertTrue($repeat->successful(), implode("\n", array_merge($repeat->failures, $repeat->conflicts)));
         self::assertCount(1, $this->commands, 'Repeated installation does not resolve the installed development dependencies again.');
         self::assertSame($before, $this->snapshot());
-        self::assertSame(['phpstan.neon.dist (unchanged)'], $repeat->files);
+        self::assertSame(['phpstan.neon (unchanged)'], $repeat->files);
     }
 
-    public function test_phpstan_preserves_existing_dependency_versions_and_unowned_configuration(): void
+    public function test_phpstan_preserves_existing_dependency_versions_and_reuses_unowned_configuration(): void
     {
         $this->simulateDependencyInstall('phpstan/phpstan', 'development', '^2.1', 'v2.2.16');
         $this->simulateDependencyInstall('larastan/larastan', 'development', '^3.10', 'v3.12.2');
@@ -272,17 +273,17 @@ NEON;
         $this->write('phpstan.neon.dist', "parameters:\n    level: 8\n");
         $report = $this->installer()->install($this->project, ['phpstan']);
 
-        self::assertFalse($report->successful());
-        self::assertSame('conflict', $report->items['phpstan']);
-        self::assertCount(1, $report->conflicts);
-        self::assertStringContainsString('phpstan.neon.dist: locally modified or unowned file preserved', $report->conflicts[0]);
-        self::assertSame("parameters:\n    level: 8\n", $this->read('phpstan.neon.dist'));
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        self::assertSame('installed', $report->items['phpstan']);
+        self::assertSame([], $report->conflicts);
+        self::assertSame("parameters:\n    level: 10\n", $this->read('phpstan.neon.dist'));
+        self::assertFileDoesNotExist($this->project.'/phpstan.neon');
         self::assertSame([], $this->commands);
         self::assertSame($manifest, $this->read('composer.json'));
         self::assertSame($lock, $this->read('composer.lock'));
         $state = json_decode($this->read('.ai/laracanon/state.json'), true);
-        self::assertSame([], $state['items']['phpstan']['files']);
-        self::assertArrayNotHasKey('phpstan.neon.dist', $state['files']);
+        self::assertSame(['phpstan.neon.dist'], $state['items']['phpstan']['files']);
+        self::assertSame('phpstan', $state['files']['phpstan.neon.dist']['owner']);
     }
 
     public function test_phpstan_dry_run_plans_root_configuration_and_development_dependencies_without_mutations(): void
@@ -296,7 +297,7 @@ NEON;
         self::assertStringContainsString('phpstan/phpstan to require-dev', $report->dependencies[0]);
         self::assertStringContainsString('larastan/larastan to require-dev', $report->dependencies[1]);
         self::assertStringContainsString('phpstan/phpstan minimum 2.0.0 will be verified after dependency installation', implode("\n", $report->notes));
-        self::assertSame(['phpstan.neon.dist (installed)'], $report->files);
+        self::assertSame(['phpstan.neon (installed)'], $report->files);
         self::assertSame([], $this->commands);
         self::assertSame($before, $this->snapshot());
     }
@@ -319,6 +320,267 @@ NEON;
             self::assertSame($before, $this->snapshot());
         }
         self::assertSame([], $this->commands);
+    }
+
+    #[DataProvider('existingPhpstanConfigurations')]
+    public function test_phpstan_changes_only_the_level_in_an_existing_configuration(string $path): void
+    {
+        $contents = $this->existingPhpstanConfiguration();
+        $expected = str_replace('level: 7 # Project analysis level.', 'level: 10 # Project analysis level.', $contents);
+        $this->write($path, $contents);
+
+        $report = $this->installer()->install($this->project, ['phpstan']);
+
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        self::assertSame(['phpstan' => 'installed'], $report->items);
+        self::assertSame($expected, $this->read($path), 'Only the level scalar changes; comments, includes, paths, exclusions, and formatting remain byte-for-byte.');
+        self::assertSame([$path.' (updated)'], $report->files);
+        foreach (['phpstan.neon', 'phpstan.neon.dist', 'phpstan.dist.neon'] as $candidate) {
+            if ($candidate !== $path) {
+                self::assertFileDoesNotExist($this->project.'/'.$candidate, 'An existing PHPStan config must not produce a duplicate.');
+            }
+        }
+        $before = $this->snapshot();
+        $commands = $this->commands;
+
+        $repeat = $this->installer()->install($this->project, ['phpstan']);
+
+        self::assertTrue($repeat->successful(), implode("\n", array_merge($repeat->failures, $repeat->conflicts)));
+        self::assertSame([$path.' (unchanged)'], $repeat->files);
+        self::assertSame($commands, $this->commands);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    /** @return array<string, array{string}> */
+    public static function existingPhpstanConfigurations(): array
+    {
+        return [
+            'local configuration' => ['phpstan.neon'],
+            'distribution configuration' => ['phpstan.neon.dist'],
+            'alternate distribution configuration' => ['phpstan.dist.neon'],
+        ];
+    }
+
+    public function test_phpstan_updates_the_active_config_and_preserves_unowned_secondary_configs(): void
+    {
+        $contents = $this->existingPhpstanConfiguration();
+        $distribution = "# Shared fallback\nparameters:\n    level: 3\n    paths: [app/Shared]\n";
+        $alternate = "parameters:\n    level: 4\n    paths: [app/Legacy]\n";
+        $this->write('phpstan.neon', $contents);
+        $this->write('phpstan.neon.dist', $distribution);
+        $this->write('phpstan.dist.neon', $alternate);
+
+        $report = $this->installer()->install($this->project, ['phpstan']);
+
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        self::assertSame(str_replace('level: 7 # Project analysis level.', 'level: 10 # Project analysis level.', $contents), $this->read('phpstan.neon'));
+        self::assertSame($distribution, $this->read('phpstan.neon.dist'));
+        self::assertSame($alternate, $this->read('phpstan.dist.neon'));
+        self::assertSame(['phpstan.neon (updated)'], $report->files);
+        $state = json_decode($this->read('.ai/laracanon/state.json'), true);
+        self::assertSame(['phpstan.neon'], $state['items']['phpstan']['files']);
+        self::assertArrayNotHasKey('phpstan.neon.dist', $state['files']);
+        self::assertArrayNotHasKey('phpstan.dist.neon', $state['files']);
+    }
+
+    public function test_phpstan_prefers_the_standard_distribution_config_to_the_alternate_filename(): void
+    {
+        $distribution = "parameters:\n    level: 5\n";
+        $alternate = "parameters:\n    level: 8\n";
+        $this->write('phpstan.neon.dist', $distribution);
+        $this->write('phpstan.dist.neon', $alternate);
+
+        $report = $this->installer()->install($this->project, ['phpstan']);
+
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        self::assertSame("parameters:\n    level: 10\n", $this->read('phpstan.neon.dist'));
+        self::assertSame($alternate, $this->read('phpstan.dist.neon'));
+        self::assertFileDoesNotExist($this->project.'/phpstan.neon');
+    }
+
+    public function test_phpstan_preserves_unrelated_edits_in_an_adopted_configuration_on_repeat(): void
+    {
+        $this->write('phpstan.neon', $this->existingPhpstanConfiguration());
+        $first = $this->installer()->install($this->project, ['phpstan']);
+        self::assertTrue($first->successful(), implode("\n", array_merge($first->failures, $first->conflicts)));
+        $edited = str_replace('app/Domain', 'app/ChangedDomain', $this->read('phpstan.neon'))."# A developer added this comment after installation.\n";
+        $this->write('phpstan.neon', $edited);
+        $before = $this->snapshot();
+
+        $repeat = $this->installer()->install($this->project, ['phpstan']);
+
+        self::assertTrue($repeat->successful(), implode("\n", array_merge($repeat->failures, $repeat->conflicts)));
+        self::assertSame(['phpstan.neon (unchanged)'], $repeat->files);
+        self::assertSame($edited, $this->read('phpstan.neon'));
+        self::assertSame($before, $this->snapshot(), 'Ownership of parameters.level must not claim the rest of an existing configuration.');
+    }
+
+    public function test_phpstan_reports_an_owned_level_edit_and_preserves_the_developer_value(): void
+    {
+        $this->write('phpstan.neon', $this->existingPhpstanConfiguration());
+        $first = $this->installer()->install($this->project, ['phpstan']);
+        self::assertTrue($first->successful(), implode("\n", array_merge($first->failures, $first->conflicts)));
+        $edited = str_replace('level: 10 # Project analysis level.', 'level: 8 # Project analysis level.', $this->read('phpstan.neon'));
+        $this->write('phpstan.neon', $edited);
+        $composer = $this->read('composer.json');
+        $lock = $this->read('composer.lock');
+        $commands = $this->commands;
+
+        foreach ([false, true] as $dryRun) {
+            $repeat = $this->installer()->install($this->project, ['phpstan'], $dryRun);
+
+            self::assertFalse($repeat->successful());
+            self::assertSame('conflict', $repeat->items['phpstan']);
+            self::assertCount(1, $repeat->conflicts);
+            self::assertStringContainsString('phpstan.neon', $repeat->conflicts[0]);
+            self::assertSame($edited, $this->read('phpstan.neon'));
+            self::assertSame($composer, $this->read('composer.json'));
+            self::assertSame($lock, $this->read('composer.lock'));
+            self::assertSame($commands, $this->commands);
+        }
+        self::assertFileDoesNotExist($this->project.'/phpstan.neon.dist');
+    }
+
+    public function test_phpstan_retains_full_file_ownership_when_it_created_the_configuration(): void
+    {
+        $first = $this->installer()->install($this->project, ['phpstan']);
+        self::assertTrue($first->successful(), implode("\n", array_merge($first->failures, $first->conflicts)));
+        $edited = $this->read('phpstan.neon')."# A local edit to a file created by Laracanon.\n";
+        $this->write('phpstan.neon', $edited);
+
+        $repeat = $this->installer()->install($this->project, ['phpstan']);
+
+        self::assertFalse($repeat->successful());
+        self::assertSame('conflict', $repeat->items['phpstan']);
+        self::assertCount(1, $repeat->conflicts);
+        self::assertSame($edited, $this->read('phpstan.neon'));
+    }
+
+    public function test_phpstan_dry_run_previews_only_the_existing_level_without_mutations(): void
+    {
+        $this->write('phpstan.neon', $this->existingPhpstanConfiguration());
+        $before = $this->snapshot();
+
+        $report = $this->installer()->install($this->project, ['phpstan'], true);
+
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        self::assertSame(['phpstan' => 'planned'], $report->items);
+        self::assertSame(['phpstan.neon (updated)'], $report->files);
+        self::assertSame([], $this->commands);
+        self::assertSame($before, $this->snapshot());
+        self::assertFileDoesNotExist($this->project.'/phpstan.neon.dist');
+    }
+
+    public function test_malformed_phpstan_config_is_preserved_while_other_selected_items_complete(): void
+    {
+        $malformed = "parameters:\n    level: [\n";
+        $this->write('phpstan.neon', $malformed);
+
+        $report = $this->installer()->install($this->project, ['phpstan', 'actions']);
+
+        self::assertFalse($report->successful());
+        self::assertSame('partial failure', $report->items['phpstan']);
+        self::assertSame('installed', $report->items['actions']);
+        self::assertNotEmpty($report->failures);
+        self::assertSame($malformed, $this->read('phpstan.neon'));
+        self::assertFileDoesNotExist($this->project.'/phpstan.neon.dist');
+        self::assertFileExists($this->project.'/.ai/rules/laracanon-actions.md');
+        self::assertFileExists($this->project.'/.ai/skills/laracanon-actions/SKILL.md');
+        self::assertStringContainsString('laracanon-actions.md', $this->read('.ai/rules/index.md'));
+        $state = json_decode($this->read('.ai/laracanon/state.json'), true);
+        self::assertSame([], $state['items']['phpstan']['files']);
+        self::assertArrayNotHasKey('phpstan.neon', $state['files']);
+    }
+
+    public function test_phpstan_upgrade_reuses_a_legacy_managed_distribution_file_without_a_duplicate(): void
+    {
+        $legacy = array_values($this->catalog()->find('phpstan')->files)[0];
+        $this->writeLegacyPhpstanState($legacy);
+
+        $report = $this->installer()->install($this->project, ['phpstan']);
+
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        self::assertSame($legacy, $this->read('phpstan.neon.dist'));
+        self::assertSame(['phpstan.neon.dist (unchanged)'], $report->files);
+        self::assertFileDoesNotExist($this->project.'/phpstan.neon');
+        $before = $this->snapshot();
+
+        $repeat = $this->installer()->install($this->project, ['phpstan']);
+
+        self::assertTrue($repeat->successful(), implode("\n", array_merge($repeat->failures, $repeat->conflicts)));
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function test_phpstan_upgrade_removes_an_unchanged_old_managed_dist_when_a_local_config_is_active(): void
+    {
+        $legacy = array_values($this->catalog()->find('phpstan')->files)[0];
+        $this->writeLegacyPhpstanState($legacy);
+        $this->write('vendor/larastan/larastan/extension.neon', "# Mock installed extension with no includes.\n");
+        $this->write('project-analysis.neon', "# Mock existing project analysis configuration.\n");
+        $local = $this->existingPhpstanConfiguration();
+        $this->write('phpstan.neon', $local);
+        $before = $this->snapshot();
+        $preview = $this->installer()->install($this->project, ['phpstan'], true);
+        self::assertTrue($preview->successful(), implode("\n", array_merge($preview->failures, $preview->conflicts)));
+        self::assertSame($before, $this->snapshot());
+
+        $report = $this->installer()->install($this->project, ['phpstan']);
+
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        self::assertSame(str_replace('level: 7 # Project analysis level.', 'level: 10 # Project analysis level.', $local), $this->read('phpstan.neon'));
+        self::assertFileDoesNotExist($this->project.'/phpstan.neon.dist');
+        self::assertStringContainsString('phpstan.neon.dist: removed retired managed file.', implode("\n", $report->notes));
+        $state = json_decode($this->read('.ai/laracanon/state.json'), true);
+        self::assertSame(['phpstan.neon'], $state['items']['phpstan']['files']);
+        self::assertArrayNotHasKey('phpstan.neon.dist', $state['files']);
+    }
+
+    public function test_phpstan_upgrade_preserves_and_reports_an_edited_old_managed_distribution_file(): void
+    {
+        $legacy = array_values($this->catalog()->find('phpstan')->files)[0];
+        $this->writeLegacyPhpstanState($legacy);
+        $this->write('vendor/larastan/larastan/extension.neon', "# Mock installed extension with no includes.\n");
+        $this->write('project-analysis.neon', "# Mock existing project analysis configuration.\n");
+        $edited = $legacy."# Preserve this old managed configuration edit.\n";
+        $this->write('phpstan.neon.dist', $edited);
+        $local = $this->existingPhpstanConfiguration();
+        $this->write('phpstan.neon', $local);
+
+        $report = $this->installer()->install($this->project, ['phpstan']);
+
+        self::assertFalse($report->successful());
+        self::assertSame('conflict', $report->items['phpstan']);
+        self::assertCount(1, $report->conflicts);
+        self::assertStringContainsString('phpstan.neon.dist', $report->conflicts[0]);
+        self::assertSame($edited, $this->read('phpstan.neon.dist'));
+        self::assertSame(str_replace('level: 7 # Project analysis level.', 'level: 10 # Project analysis level.', $local), $this->read('phpstan.neon'));
+        $state = json_decode($this->read('.ai/laracanon/state.json'), true);
+        self::assertContains('phpstan.neon.dist', $state['items']['phpstan']['files']);
+        self::assertContains('phpstan.neon', $state['items']['phpstan']['files']);
+        self::assertSame(hash('sha256', $legacy), $state['files']['phpstan.neon.dist']['hash']);
+    }
+
+    public function test_phpstan_upgrade_preserves_a_legacy_managed_dist_included_by_the_active_config(): void
+    {
+        $legacy = array_values($this->catalog()->find('phpstan')->files)[0];
+        $this->writeLegacyPhpstanState($legacy);
+        $local = "includes:\n    - phpstan.neon.dist\n\nparameters:\n    level: 7\n    paths: [app/Domain]\n";
+        $this->write('phpstan.neon', $local);
+
+        $report = $this->installer()->install($this->project, ['phpstan']);
+
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        self::assertSame(str_replace('level: 7', 'level: 10', $local), $this->read('phpstan.neon'));
+        self::assertSame($legacy, $this->read('phpstan.neon.dist'), 'A referenced fallback config must remain available so the existing includes still work.');
+        $state = json_decode($this->read('.ai/laracanon/state.json'), true);
+        self::assertContains('phpstan.neon.dist', $state['items']['phpstan']['files']);
+        self::assertContains('phpstan.neon', $state['items']['phpstan']['files']);
+        $before = $this->snapshot();
+
+        $repeat = $this->installer()->install($this->project, ['phpstan']);
+
+        self::assertTrue($repeat->successful(), implode("\n", array_merge($repeat->failures, $repeat->conflicts)));
+        self::assertSame($before, $this->snapshot());
     }
 
     public function test_data_installs_runtime_dependency_and_project_workflow_without_overriding_package_skill(): void
@@ -688,6 +950,47 @@ MARKDOWN);
         $lock = json_decode($this->read('composer.lock'), true);
         $lock[$type === 'development' ? 'packages-dev' : 'packages'][] = ['name' => $package, 'version' => $version];
         $this->writeJson('composer.lock', $lock);
+    }
+
+    private function existingPhpstanConfiguration(): string
+    {
+        return <<<'NEON'
+# Project configuration: preserve this comment and its spacing.
+includes:
+    - vendor/larastan/larastan/extension.neon
+    - project-analysis.neon
+
+parameters:
+    # A comment mentioning level: 2 is not the setting.
+    level: 7 # Project analysis level.
+    paths:
+        - app/Domain
+        - app/Services
+    excludePaths:
+        analyse:
+            - app/Legacy/*
+    tmpDir: storage/phpstan-cache
+    reportUnmatchedIgnoredErrors: false
+
+NEON;
+    }
+
+    private function writeLegacyPhpstanState(string $contents): void
+    {
+        $this->write('phpstan.neon.dist', $contents);
+        $this->writeJson('.ai/laracanon/state.json', [
+            'schema' => 1,
+            'files' => [
+                'phpstan.neon.dist' => ['hash' => hash('sha256', $contents), 'owner' => 'phpstan'],
+            ],
+            'items' => [
+                'phpstan' => [
+                    'source_hash' => hash('sha256', 'Laracanon v0.1.0 phpstan item'),
+                    'files' => ['phpstan.neon.dist'],
+                    'status' => 'installed',
+                ],
+            ],
+        ]);
     }
 
     private function write(string $path, string $contents): void

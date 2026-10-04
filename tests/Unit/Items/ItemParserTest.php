@@ -23,6 +23,7 @@ final class ItemParserTest extends TestCase
         self::assertSame(['app/**/*.php'], $item->paths);
         self::assertSame([], $item->dependencies);
         self::assertSame([], $item->composerPlugins);
+        self::assertSame([], $item->neonUpdates);
         self::assertSame([], $item->files);
         self::assertNull($item->rules);
         self::assertNull($item->examples);
@@ -245,6 +246,138 @@ YAML;
             'trailing whitespace' => [$pluginsPrefix."['vendor/plugin ']", $pluginError],
             'duplicate plugin' => [$pluginsPrefix.'[vendor/plugin, vendor/plugin]', 'Duplicate Composer plugin vendor/plugin for vendor/package'],
         ];
+    }
+
+    public function test_neon_updates_are_optional_and_appended_after_existing_item_arguments(): void
+    {
+        $constructed = new Item('example', 'Example.', [], [], null, null, null, null, 'hash', false, false, [], [], ['vendor/package' => ['vendor/plugin']]);
+        $empty = (new ItemParser)->parse($this->markdown(extra: 'neon_updates: {}'));
+
+        self::assertSame([], $constructed->neonUpdates);
+        self::assertSame(['vendor/package' => ['vendor/plugin']], $constructed->composerPlugins);
+        self::assertSame([], $empty->neonUpdates);
+    }
+
+    public function test_neon_updates_keep_ordered_candidates_scalar_types_and_literal_default_independent_of_sections(): void
+    {
+        $metadata = <<<'YAML'
+dependencies:
+  development: [phpstan/phpstan]
+neon_updates:
+  phpstan.neon:
+    candidates: [phpstan.neon, phpstan.neon.dist, phpstan.dist.neon]
+    set:
+      parameters.level: 10
+      parameters.label: '10'
+      parameters.enabled: true
+      parameters.ratio: 1.5
+      parameters.optional: null
+      _custom.option_2: false
+YAML;
+        $literal = "includes:\n    - vendor/custom/extension.neon\n\nparameters:\n    level: 10\n";
+        $item = (new ItemParser)->parse($this->markdown(extra: $metadata, body: "## Examples\nUse the active configuration.\n## Files\n### phpstan.neon\n```neon\n".$literal.'```'));
+
+        self::assertSame([
+            'phpstan.neon' => [
+                'candidates' => ['phpstan.neon', 'phpstan.neon.dist', 'phpstan.dist.neon'],
+                'set' => [
+                    'parameters.level' => 10,
+                    'parameters.label' => '10',
+                    'parameters.enabled' => true,
+                    'parameters.ratio' => 1.5,
+                    'parameters.optional' => null,
+                    '_custom.option_2' => false,
+                ],
+            ],
+        ], $item->neonUpdates);
+        self::assertSame(['phpstan.neon' => $literal], $item->files);
+        self::assertSame('Use the active configuration.', $item->examples);
+        self::assertSame('phpstan/phpstan', $item->dependencies[0]->package);
+        self::assertNull($item->rules);
+        self::assertNull($item->skill);
+        self::assertNull($item->skillName);
+    }
+
+    #[DataProvider('invalidNeonUpdates')]
+    public function test_neon_updates_reject_unsafe_or_ambiguous_metadata_with_source_context(string $metadata, string $message): void
+    {
+        $this->expectException(ItemFormatException::class);
+        $this->expectExceptionMessage('/items/example.md: '.$message);
+
+        (new ItemParser)->parse($this->markdown(extra: $metadata, body: "## Files\n### phpstan.neon\n```neon\nparameters:\n    level: 10\n```\n### config/example.neon\n```neon\nparameters: []\n```"), '/items/example.md');
+    }
+
+    /** @return array<string, array{string, string}> */
+    public static function invalidNeonUpdates(): array
+    {
+        $prefix = "neon_updates:\n  phpstan.neon:\n";
+        $candidates = $prefix."    candidates: [phpstan.neon]\n    set: ";
+        $mappingError = 'neon_updates must map declared root NEON file destinations';
+        $destinationError = 'neon_updates keys must reference root NEON destinations declared in ## Files';
+        $shapeError = 'neon_updates.phpstan.neon must contain only candidates and set';
+        $candidatesError = 'neon_updates.phpstan.neon.candidates must be a nonempty ordered list';
+        $candidatePathError = 'neon_updates candidates must be safe canonical root filenames ending .neon or .neon.dist';
+        $setError = 'neon_updates.phpstan.neon.set must be a nonempty mapping';
+        $pathError = 'neon_updates set paths must contain dot-separated mapping identifiers';
+        $scalarError = 'neon_updates set values must be strings, integers, floats, booleans, or null';
+
+        return [
+            'null mapping' => ['neon_updates: null', $mappingError],
+            'scalar mapping' => ['neon_updates: phpstan.neon', $mappingError],
+            'list mapping' => ['neon_updates: [phpstan.neon]', $mappingError],
+            'undeclared default' => ["neon_updates:\n  phpstan.neon.dist: {candidates: [phpstan.neon.dist], set: {parameters.level: 10}}", $destinationError],
+            'nonroot default' => ["neon_updates:\n  config/example.neon: {candidates: [config/example.neon], set: {parameters.level: 10}}", $destinationError],
+            'integer default' => ["neon_updates:\n  123: {candidates: [phpstan.neon], set: {parameters.level: 10}}", $destinationError],
+            'empty update' => [$prefix.'    {}', $shapeError],
+            'scalar update' => ['neon_updates: {phpstan.neon: false}', $shapeError],
+            'list update' => ['neon_updates: {phpstan.neon: [phpstan.neon]}', $shapeError],
+            'missing set' => [$prefix.'    candidates: [phpstan.neon]', $shapeError],
+            'missing candidates' => [$prefix.'    set: {parameters.level: 10}', $shapeError],
+            'unknown update key' => [$prefix."    candidates: [phpstan.neon]\n    set: {parameters.level: 10}\n    append: true", $shapeError],
+            'null candidates' => [$prefix."    candidates: null\n    set: {parameters.level: 10}", $candidatesError],
+            'scalar candidates' => [$prefix."    candidates: phpstan.neon\n    set: {parameters.level: 10}", $candidatesError],
+            'empty candidates' => [$prefix."    candidates: []\n    set: {parameters.level: 10}", $candidatesError],
+            'mapped candidates' => [$prefix."    candidates: {default: phpstan.neon}\n    set: {parameters.level: 10}", $candidatesError],
+            'nonstring candidate' => [$prefix."    candidates: [phpstan.neon, true]\n    set: {parameters.level: 10}", $candidatePathError],
+            'nested candidate' => [$prefix."    candidates: [phpstan.neon, config/example.neon]\n    set: {parameters.level: 10}", $candidatePathError],
+            'traversal candidate' => [$prefix."    candidates: [phpstan.neon, '../phpstan.neon']\n    set: {parameters.level: 10}", $candidatePathError],
+            'absolute candidate' => [$prefix."    candidates: [phpstan.neon, /phpstan.neon]\n    set: {parameters.level: 10}", $candidatePathError],
+            'wrong extension' => [$prefix."    candidates: [phpstan.neon, phpstan.yaml]\n    set: {parameters.level: 10}", $candidatePathError],
+            'backup extension' => [$prefix."    candidates: [phpstan.neon, phpstan.neon.dist.bak]\n    set: {parameters.level: 10}", $candidatePathError],
+            'spaced candidate' => [$prefix."    candidates: [phpstan.neon, ' phpstan.neon.dist']\n    set: {parameters.level: 10}", $candidatePathError],
+            'wrong precedence' => [$prefix."    candidates: [phpstan.neon.dist, phpstan.neon]\n    set: {parameters.level: 10}", 'neon_updates.phpstan.neon.candidates must start with its declared default destination'],
+            'duplicate candidates' => [$prefix."    candidates: [phpstan.neon, phpstan.neon]\n    set: {parameters.level: 10}", 'neon_updates.phpstan.neon.candidates must contain unique filenames'],
+            'null set' => [$candidates.'null', $setError],
+            'scalar set' => [$candidates.'10', $setError],
+            'empty set' => [$candidates.'{}', $setError],
+            'list set' => [$candidates.'[10]', $setError],
+            'integer mapping path' => [$candidates.'{123: 10}', $pathError],
+            'empty mapping path' => [$candidates."{'': 10}", $pathError],
+            'leading separator' => [$candidates.'{.parameters: 10}', $pathError],
+            'trailing separator' => [$candidates.'{parameters.: 10}', $pathError],
+            'empty path segment' => [$candidates.'{parameters..level: 10}', $pathError],
+            'numeric path segment' => [$candidates.'{parameters.0: 10}', $pathError],
+            'wildcard path segment' => [$candidates."{'parameters.*': 10}", $pathError],
+            'spaced path segment' => [$candidates."{'parameters. level': 10}", $pathError],
+            'array value' => [$candidates.'{parameters.level: [10]}', $scalarError],
+            'mapping value' => [$candidates.'{parameters.level: {value: 10}}', $scalarError],
+            'infinite float' => [$candidates.'{parameters.level: .inf}', 'neon_updates set floats must be finite values'],
+            'negative infinite float' => [$candidates.'{parameters.level: -.inf}', 'neon_updates set floats must be finite values'],
+            'not a number float' => [$candidates.'{parameters.level: .nan}', 'neon_updates set floats must be finite values'],
+            'parent before child' => [$candidates.'{parameters: null, parameters.level: 10}', 'neon_updates set paths must not overlap parent and child mappings'],
+            'child before parent' => [$candidates.'{parameters.level: 10, parameters: null}', 'neon_updates set paths must not overlap parent and child mappings'],
+            'deeper overlapping mapping' => [$candidates.'{custom.mapping: null, custom.mapping.option: true}', 'neon_updates set paths must not overlap parent and child mappings'],
+        ];
+    }
+
+    public function test_neon_update_paths_with_common_prefixes_remain_independent(): void
+    {
+        $item = (new ItemParser)->parse($this->markdown(
+            extra: "neon_updates:\n  phpstan.neon:\n    candidates: [phpstan.neon]\n    set: {parameters.level: 10, parameters.levelName: 'strict', parameter: false}",
+            body: "## Files\n### phpstan.neon\n```neon\nparameters:\n    level: 10\n```",
+        ));
+
+        self::assertSame(['parameters.level' => 10, 'parameters.levelName' => 'strict', 'parameter' => false], $item->neonUpdates['phpstan.neon']['set']);
     }
 
     public function test_authored_skills_get_a_namespaced_default_name(): void

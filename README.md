@@ -78,7 +78,7 @@ The library adapts the conventions from `Pamo/pamo-dashboard/.ai/rules/`, each i
 | --- | --- | --- | --- |
 | `data` | `spatie/laravel-data` | Runtime | Input factories, output Resources, normalization, and an authored project workflow |
 | `insights` | `nunomaduro/phpinsights` | Development | PHP Insights with the exact City Directory configuration |
-| `phpstan` | `phpstan/phpstan`, `larastan/larastan` | Development | Level 10 Laravel analysis with `phpstan.neon.dist` |
+| `phpstan` | `phpstan/phpstan`, `larastan/larastan` | Development | Level 10 Laravel analysis using the existing PHPStan configuration |
 
 Convention items contain concise rules and may include a separately authored implementation skill. The rules define lasting conventions; an authored skill explains how to inspect the application, implement that concern, and verify the result. The skills stay in their own source items, with links to related workflows rather than mixed concerns. `eloquent-strictness` is a rules-only item: installation adds guidance without modifying the application provider or generating a custom skill. Package items can install configuration and rely on dependency-provided skills without adding project rules or generating a custom skill.
 
@@ -89,7 +89,9 @@ php artisan canon:install insights --dry-run
 php artisan canon:install insights
 ```
 
-`phpstan` installs compatible stable releases of PHPStan and Larastan into `require-dev` and writes `phpstan.neon.dist` in the application root. Its exact configuration includes Larastan and Laravel's existing Carbon extension, sets level 10, analyzes `app`, and excludes `tests/*`, `database/*`, `config/*`, `vendor/*`, and `app/Providers/*`. Carbon's installed version is preserved. [Level 10 requires PHPStan 2](https://phpstan.org/user-guide/rule-levels); an incompatible existing PHPStan version is reported and the item's configuration is skipped. Existing constraints, local edits, and Composer scripts are preserved. A local `phpstan.neon` takes precedence over the distributed configuration. The [item source](resources/items/phpstan.md) contains the dependencies and literal configuration together, with no generated rule or custom skill.
+`phpstan` installs missing compatible stable releases of PHPStan and Larastan into `require-dev`, preserving existing constraints and installed versions. It checks configurations in [PHPStan's discovery order](https://phpstan.org/config-reference#config-file): `phpstan.neon`, `phpstan.neon.dist`, then `phpstan.dist.neon`. When a configuration exists, Laracanon changes only `parameters.level` to `10` and preserves its includes, paths, exclusions, comments, and other settings. It creates no duplicate configuration. A malformed or unsupported configuration is reported and preserved.
+
+If none exists, the item creates `phpstan.neon` with Larastan and Laravel's existing Carbon extension, level 10, the `app` analysis path, and exclusions for `tests/*`, `database/*`, `config/*`, `vendor/*`, and `app/Providers/*`. Carbon's installed version is preserved. [Level 10 requires PHPStan 2](https://phpstan.org/user-guide/rule-levels); an incompatible existing PHPStan version is reported and the configuration is skipped. For adopted existing configurations, repeat installs permit unrelated edits but report a conflict if the managed level was locally changed. Configurations created by Laracanon retain whole-file ownership, so any local edits are preserved and reported as conflicts. Composer scripts are preserved. The [item source](resources/items/phpstan.md) contains the dependencies, update metadata, and literal default together, with no generated rule or custom skill.
 
 ```sh
 php artisan canon:install phpstan --dry-run
@@ -174,6 +176,7 @@ Optional frontmatter:
 - `dependencies.development`: package names to add to `require-dev`.
 - `minimum_versions`: a mapping of declared dependency names to quoted stable `major.minor.patch` versions required by the item's resources. Incompatible or unverifiable installed or locked versions are reported without upgrades; that item's files are skipped. Actual installed versions are checked again after Composer completes.
 - `composer_plugins`: a mapping of declared dependency names to lists of exact lowercase Composer plugin package names needed by those dependencies, including transitive plugins. Laracanon configures missing project permissions only for selected item dependencies; existing explicit allow/deny, pattern, and boolean policies take precedence. Version constraints, wildcard entries, malformed values, and duplicate plugins within one dependency list are rejected. Different dependencies may declare the same plugin.
+- `neon_updates`: a mapping of root NEON destinations declared in `## Files` to `candidates` and `set`. `candidates` is a nonempty ordered list of unique canonical root filenames ending `.neon` or `.neon.dist`, beginning with the declared default destination. `set` is a nonempty mapping of dot-separated identifiers to strings, integers, finite floats, booleans, or null. Unknown update keys, overlapping parent/child paths, arrays, and object values are rejected. The first existing candidate receives only the declared scalar changes; the literal file is the fallback when no candidate exists.
 - `sample: true`: label a demonstration in the list command.
 - `skill_name`: a skill identifier, only with a nonempty authored Skill section. The default is `laracanon-<item-name>`.
 - `overrides_skill: true`: explicitly allow this skill to replace a dependency-provided skill of the same name. This never authorizes overwriting locally edited files.
@@ -202,6 +205,18 @@ return ['enabled' => true];
 
 Supported destinations are canonical relative paths inside `config/` and root configuration filenames ending in `.neon` or `.neon.dist`, such as `phpstan.neon.dist`. Root filenames must start with an ASCII letter or digit and contain only letters, digits, dots, underscores, or hyphens. Duplicate destinations, parent traversal, symlinked paths, and malformed blocks are rejected. Multiple files can appear in the section; no other prose belongs there. Backtick or tilde fences are supported with an optional language. Payload content, including leading/trailing blank lines and the newline before the closing fence, is preserved; item line endings are normalized to LF. Files are written after the item's dependencies and minimum-version checks succeed; Laracanon copies literal content without templating it. Files have the same ownership, update, retirement, conflict, and dry-run protections as rules and skills. They create no custom skill.
 
+Use `neon_updates` when an item should configure selected scalar settings in an existing NEON file instead of installing an entire second configuration. For example, the PHPStan item declares:
+
+```yaml
+neon_updates:
+  phpstan.neon:
+    candidates: [phpstan.neon, phpstan.neon.dist, phpstan.dist.neon]
+    set:
+      parameters.level: 10
+```
+
+Its `## Files` section still declares a literal `### phpstan.neon` default. Candidate order selects the active existing configuration; Laracanon preserves every unrelated value and the file's remaining bytes, including comments and formatting. Declared scalar updates also apply to the default before its first write, making the initial installation and retries consistent. Mapping path segments use letters or underscores followed by letters, digits, or underscores; dots separate nested mappings. Unsupported structure or ambiguous duplicate keys produce a failure instead of a rewritten configuration. A dry run performs the same inspection and reports the selected path and planned change without writing. This metadata is generic and requires no item-specific installer code or skill.
+
 Applications can point `config('laracanon.items_path')` at an alternative item directory, for example via a small `config/laracanon.php` returning `['items_path' => resource_path('canon/items')]`. This replaces the bundled catalog and uses the same format and discovery.
 
 ## Rules, skills, and Boost
@@ -222,7 +237,11 @@ Commit `.ai/laracanon/state.json` and `.ai/laracanon/boost-state.json` with the 
 
 Repeat installation leaves identical content unchanged. A new source version updates a managed file only if its current content still matches the recorded hash. Locally edited or unrelated files are preserved and reported. An unowned file with exactly the requested content can be adopted as managed; future updates then follow its recorded hash. Removed rules, skills, or configuration files retire only unchanged owned files. Shared output names between items are rejected.
 
-To resolve a conflict, compare the installed file with the item source, then either preserve the project edit outside the managed file or explicitly remove the conflicted output and reinstall. There is no automatic force-overwrite option. Deleting ownership state deliberately makes differing existing files unowned and therefore protected.
+NEON updates manage individual scalar paths separately from whole-file ownership. The first installation may set an existing level to the item's requested value; later installations compare the managed scalar with its recorded value. Edits to unrelated settings or comments remain permitted. A local change to a managed scalar produces a conflict and is preserved. The selected configuration path and managed values are recorded with the item's state, so retrying does not create a second configuration or silently reset an edited level.
+
+When upgrading from an earlier PHPStan item, an existing managed `phpstan.neon.dist` remains the selected configuration if no higher-priority file exists. If `phpstan.neon` exists, an unused, unchanged, previously owned `.dist` file can retire after the replacement succeeds. Edited or unowned files and included or potentially referenced configurations are preserved. A replacement conflict retains the prior configuration. Fresh literal configurations remain whole-file managed; adopted configurations manage only their declared scalar paths, and retirement releases those settings while preserving the application file. Field-level ownership uses state schema 2; older versions that cannot read that schema reject it rather than overwriting managed configuration.
+
+To resolve a conflict, compare the installed file with the item source, then either preserve the project edit outside the managed file or explicitly remove the conflicted output and reinstall. There is no automatic force-overwrite option. Without ownership state, differing existing literal outputs remain unowned and protected. Selecting a NEON update without ownership history may set its explicitly declared scalar fields again; keep the state file to retain managed-field conflict protection.
 
 Dependencies are never removed on item updates. New direct requirements are batched by runtime/development section using [Composer's multiple-package require command](https://getcomposer.org/doc/03-cli.md#require-r). This avoids repeating dependency resolution, autoload generation, project scripts, and audits for each new package. Existing declared dependencies use their current installation or scoped-update recovery path. Composer scripts and security audits keep their existing behavior; slow repository requests can still take time.
 
