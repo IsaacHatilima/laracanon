@@ -18,6 +18,7 @@ use Laravel\Boost\Rules\RuleRepository;
 use Laravel\Boost\Support\RenderFailures;
 use Laravel\Roster\ProjectManager;
 use Orchestra\Testbench\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 final class BoostProjectRefresherTest extends TestCase
 {
@@ -82,6 +83,121 @@ final class BoostProjectRefresherTest extends TestCase
         self::assertFileExists($this->project.'/.agents/skills/infer-conventions/SKILL.md');
         self::assertStringContainsString('[mcp_servers.laravel-boost]', $this->read('.codex/config.toml'));
         self::assertSame(['codex'], json_decode($this->read('boost.json'), true)['agents']);
+    }
+
+    #[DataProvider('bootstrapConfigurationStates')]
+    public function test_verified_laravel_bootstrap_guidance_is_replaced_preserving_project_instructions_and_repeats(bool $configured): void
+    {
+        if ($configured) {
+            $this->writeJson('boost.json', ['agents' => ['claude_code', 'codex', 'junie', 'opencode'], 'guidelines' => true, 'mcp' => false, 'skills' => [], 'packages' => []]);
+        }
+        $prefix = "# Project instructions\n\nKeep this deployment policy.\n\n";
+        $suffix = "\n# Local review checklist\n\nPreserve these project preferences.\n";
+        $this->write('AGENTS.md', $prefix.$this->bootstrapGuidelines().$suffix);
+        self::assertFileDoesNotExist($this->project.'/.ai/laracanon/boost-state.json');
+
+        $first = (new BoostProjectRefresher)->refresh(['fixture/toolkit']);
+
+        self::assertSame([], $first['failures']);
+        self::assertSame([], $first['conflicts']);
+        $agents = $this->read('AGENTS.md');
+        self::assertStringStartsWith($prefix, $agents);
+        self::assertStringEndsWith($suffix, $agents);
+        self::assertStringNotContainsString('Complete the following setup before working', $agents);
+        self::assertStringContainsString('@.ai/rules/index.md', $agents);
+        self::assertStringContainsString('Package instructions for the test toolkit.', $agents);
+        self::assertFileExists($this->project.'/.agents/skills/toolkit-development/SKILL.md');
+        $state = $this->read('.ai/laracanon/boost-state.json');
+        preg_match('/<laravel-boost-guidelines>.*?<\/laravel-boost-guidelines>/s', $agents, $block);
+        self::assertSame(hash('sha256', $block[0]), json_decode($state, true)['hashes']['AGENTS.md#boost-guidelines']);
+
+        $repeat = (new BoostProjectRefresher)->refresh(['fixture/toolkit']);
+
+        self::assertSame([], $repeat['failures']);
+        self::assertSame([], $repeat['conflicts']);
+        self::assertSame($agents, $this->read('AGENTS.md'));
+        self::assertSame($state, $this->read('.ai/laracanon/boost-state.json'));
+    }
+
+    /** @return array<string, array{bool}> */
+    public static function bootstrapConfigurationStates(): array
+    {
+        return [
+            'first Boost setup' => [false],
+            'existing Boost configuration without managed guidance' => [true],
+        ];
+    }
+
+    public function test_an_edited_official_bootstrap_block_is_preserved_and_reported(): void
+    {
+        $existing = "Project-owned instructions.\n\n".str_replace('## Agent Setup', "## Agent Setup\n\nMy custom installation instructions.", $this->bootstrapGuidelines());
+        $this->write('AGENTS.md', $existing);
+
+        $report = (new BoostProjectRefresher)->refresh(['fixture/toolkit']);
+
+        self::assertSame([], $report['failures']);
+        self::assertCount(1, $report['conflicts']);
+        self::assertStringContainsString('Boost block in AGENTS.md', $report['conflicts'][0]);
+        self::assertSame($existing, $this->read('AGENTS.md'));
+        $state = json_decode($this->read('.ai/laracanon/boost-state.json'), true);
+        self::assertArrayNotHasKey('AGENTS.md#boost-guidelines', $state['hashes']);
+        self::assertFileExists($this->project.'/.agents/skills/toolkit-development/SKILL.md');
+    }
+
+    public function test_duplicate_official_bootstrap_blocks_are_preserved_and_reported(): void
+    {
+        $existing = $this->bootstrapGuidelines()."\n".$this->bootstrapGuidelines();
+        $this->write('AGENTS.md', $existing);
+
+        $report = (new BoostProjectRefresher)->refresh(['fixture/toolkit']);
+
+        self::assertSame([], $report['failures']);
+        self::assertCount(1, $report['conflicts']);
+        self::assertSame($existing, $this->read('AGENTS.md'));
+        $state = json_decode($this->read('.ai/laracanon/boost-state.json'), true);
+        self::assertArrayNotHasKey('AGENTS.md#boost-guidelines', $state['hashes']);
+    }
+
+    #[DataProvider('strayBootstrapMarkers')]
+    public function test_official_bootstrap_with_an_unmatched_marker_is_preserved_without_adoption(string $marker): void
+    {
+        $existing = "# Project-owned instructions\n\nKeep this text unchanged.\n\n".$this->bootstrapGuidelines()."\n".$marker."\n\n# Project-owned footer\n";
+        $this->write('AGENTS.md', $existing);
+
+        $report = (new BoostProjectRefresher)->refresh(['fixture/toolkit']);
+
+        self::assertSame([], $report['failures']);
+        self::assertCount(1, $report['conflicts']);
+        self::assertStringContainsString('Boost block in AGENTS.md', $report['conflicts'][0]);
+        self::assertSame($existing, $this->read('AGENTS.md'), 'A complete canonical block must not authorize writes around unmatched markers.');
+        $state = json_decode($this->read('.ai/laracanon/boost-state.json'), true);
+        self::assertArrayNotHasKey('AGENTS.md#boost-guidelines', $state['hashes']);
+    }
+
+    /** @return array<string, array{string}> */
+    public static function strayBootstrapMarkers(): array
+    {
+        return [
+            'unmatched opening marker' => ['<laravel-boost-guidelines>'],
+            'unmatched closing marker' => ['</laravel-boost-guidelines>'],
+        ];
+    }
+
+    public function test_a_managed_guideline_block_replaced_with_the_official_bootstrap_still_conflicts(): void
+    {
+        $first = (new BoostProjectRefresher)->refresh(['fixture/toolkit']);
+        self::assertSame([], $first['failures']);
+        self::assertSame([], $first['conflicts']);
+        $state = $this->read('.ai/laracanon/boost-state.json');
+        $existing = "Keep these current project instructions.\n\n".$this->bootstrapGuidelines();
+        $this->write('AGENTS.md', $existing);
+
+        $report = (new BoostProjectRefresher)->refresh(['fixture/toolkit']);
+
+        self::assertSame([], $report['failures']);
+        self::assertCount(1, $report['conflicts']);
+        self::assertSame($existing, $this->read('AGENTS.md'));
+        self::assertSame($state, $this->read('.ai/laracanon/boost-state.json'), 'The verified bootstrap exception must not bypass an established ownership baseline.');
     }
 
     public function test_selected_new_package_resources_are_opted_in_without_losing_config_or_scripts(): void
@@ -393,6 +509,18 @@ final class BoostProjectRefresherTest extends TestCase
     {
         File::ensureDirectoryExists(dirname($this->project.'/'.$path));
         file_put_contents($this->project.'/'.$path, $contents);
+    }
+
+    private function bootstrapGuidelines(): string
+    {
+        // Exact laravel/laravel v13.10.1 scaffold bytes, independently checked
+        // against its official source before adding this regression fixture.
+        $contents = (string) file_get_contents(dirname(__DIR__, 2).'/Fixtures/Boost/laravel-bootstrap-guidelines.md');
+        preg_match_all('/<laravel-boost-guidelines>.*?<\/laravel-boost-guidelines>/s', $contents, $blocks);
+        self::assertCount(1, $blocks[0]);
+        self::assertSame('e4f9841acc3d38f50c4b6ce4853876f7c12a4ce8a89dfa53613dbb9a7ea72031', hash('sha256', $blocks[0][0]));
+
+        return $contents;
     }
 
     private function writeNativeGuidelines(bool $enforceTests, bool $hasSkills): void
