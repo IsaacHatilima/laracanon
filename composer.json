@@ -4,6 +4,11 @@
     "type": "library",
     "license": "MIT",
     "keywords": ["laravel", "development", "toolkit", "boost", "ai"],
+    "homepage": "https://github.com/IsaacHatilima/laracanon",
+    "support": {
+        "issues": "https://github.com/IsaacHatilima/laracanon/issues",
+        "source": "https://github.com/IsaacHatilima/laracanon"
+    },
     "authors": [{"name": "Isaac Hatilima"}],
     "require": {
         "php": "^8.2",
