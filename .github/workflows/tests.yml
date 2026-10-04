@@ -1,0 +1,31 @@
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '8.2'
+            laravel: '^11.45.3'
+            testbench: '^9.15'
+            phpunit: '^11.5'
+          - php: '8.3'
+            laravel: '^12.41.1'
+            testbench: '^10.6'
+            phpunit: '^12.0'
+          - php: '8.3'
+            laravel: '^13.0'
+            testbench: '^11.0'
+            phpunit: '^12.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - run: composer require --dev "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" "phpunit/phpunit:${{ matrix.phpunit }}" --no-interaction --no-progress
+      - run: composer check

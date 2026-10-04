@@ -1,0 +1,27 @@
+---
+name: migrations
+description: 'Implement forward migrations with matching key types, explicit deletion policies, string enum columns, and honest rollback plans.'
+paths:
+  - 'database/migrations/**'
+---
+
+## Rules
+
+- New entity tables use UUID primary keys; pivot and lookup tables keep integer primary keys. Foreign keys match the referenced column's actual type, regardless of the referencing table's own key type. Preserve established keys unless their migration is explicitly in scope.
+- Every foreign key declares a deletion policy chosen for the domain: restrict, cascade, or set null as appropriate. Do not cascade destructive deletes by default. `nullOnDelete()` requires a nullable foreign-key column, with column modifiers before `constrained()`.
+- Store PHP enum backing values in `string()` columns with suitable lengths, casting them on the model. Do not use database `enum` columns or translated labels as stored values.
+- Every migration has `up()` and `down()`. Preserve migrations already applied or deployed; make schema changes in new forward migrations. A schema rollback does not restore discarded data: describe any irreversible data loss and the deployment/rollback plan within the approved scope.
+
+Use the `laracanon-migrations` skill for migration design and validation.
+
+## Skill
+
+Use this **Laracanon-authored workflow** when adding or changing schema. It adds no dependencies and never runs application migrations as part of installing this item.
+
+1. Read the existing migrations, current schema, model key types, relationships, affected actions, casts, factories, and deployment state. Inspect the database engine/version and migration status on the intended connection. Determine which migration files have already been applied or shared. Generate a new migration for an existing deployed schema; do not rewrite its history or convert existing keys because an example uses UUIDs.
+2. Choose the new table's key from its domain role. An entity uses `$table->uuid('id')->primary()` and its model uses `HasUuids`; a pivot or lookup uses `$table->id()`. For an existing User, match its actual primary key and preserve the accepted creation flow's name, email, phone, and password columns. The model generates an entity UUID; a schema UUID declaration alone does not generate it. Keep constraints/defaults deliberate, including a unique email index where that application's User contract requires one. See Laravel's [column type documentation](https://laravel.com/docs/13.x/migrations#available-column-types).
+3. Match every reference to the existing parent key: use `foreignUuid('user_id')->constrained('users')` for a UUID User key, or the supported integer reference for an integer key. A pivot can have an integer primary key and still reference a UUID entity. For UUID-only polymorphic targets, use `uuidMorphs()` or `nullableUuidMorphs()` so the discriminator and identifier types agree; preserve the application's established strategy for other target types. Do not infer a foreign-key type from the child table's primary key.
+4. State the deletion policy from the relationship's lifecycle. Choose `restrictOnDelete()` where referenced records must prevent deletion, `cascadeOnDelete()` only for intentionally dependent data, or `nullOnDelete()` where the child can remain meaningfully detached. For the latter, call `nullable()` before `constrained()`, then `nullOnDelete()`. A database cascade is a deliberate data-loss decision, not a framework requirement. Review soft-delete and archival behavior separately: soft-deleting a parent does not trigger a physical foreign-key cascade. Laravel's [foreign-key documentation](https://laravel.com/docs/13.x/migrations#foreign-key-constraints) lists these methods and modifier ordering.
+5. For an enum field that is actually required, use a string column sized for its stable backing values, such as `string('status', 32)`. Freeze a migration default as its intended scalar value, such as `'active'`, rather than evaluating an enum whose cases may change after deployment. Match the model's enum cast and approved input/output contracts. Before narrowing a type, adding a required column, or changing a value, inspect existing rows and plan a compatible forward backfill within scope. Account for the target engine's locking and DDL behavior; do not assume a PHP transaction makes every schema operation transactional.
+6. Implement `up()` and its explicit `down()` counterpart using actual constraint/index names and reverse dependency order. Drop or alter dependent foreign keys before their columns when required by the database. Explain when rollback removes newly stored values or cannot reconstruct deleted/backfilled data. Keep deployed-migration history intact and make a rollback/data recovery plan appropriate to the requested change; do not claim that recreating a column restores its contents.
+7. In an authorized disposable database, run the relevant migration, inspect keys/types/defaults/indexes/foreign-key policies, and verify representative inserts and deletion behavior. Test rollback and a second application there when the migration supports that cycle. Run focused model/action checks against the resulting schema, including enum casts and nullable behavior. Do not run `migrate:fresh`, rollback, or destructive schema checks against a shared or deployed database simply to validate this item. Report the database engine tested and any production-engine or data-recovery behavior that remains unverified.
