@@ -2,13 +2,19 @@
 
 `isaachatilima/laracanon` is a Composer development package for existing Laravel applications. It installs selected pieces of a reusable toolkit: architecture conventions, package integrations, development practices, and authored workflows.
 
-The repository is [IsaacHatilima/laracanon](https://github.com/IsaacHatilima/laracanon). The package has not been published to Packagist.
+Package: [isaachatilima/laracanon on Packagist](https://packagist.org/packages/isaachatilima/laracanon). Repository: [IsaacHatilima/laracanon](https://github.com/IsaacHatilima/laracanon).
 
 ## Installation
 
 Requires PHP 8.2+ and Laravel 11, 12, or 13. Composer checks compatibility with the application's PHP and framework constraints. Boost integration requires the `RuleRepository`, `RuleComposer`, and agent-skill APIs verified against **Laravel Boost v2.10.1**. An older installed Boost version without these APIs produces a clear failure; Laracanon does not force a framework, PHP, or existing Boost upgrade.
 
-Install from GitHub by configuring a [VCS repository](https://getcomposer.org/doc/05-repositories.md#vcs) in the **target Laravel application**:
+Install as a development dependency in the **target Laravel application**:
+
+```sh
+composer require --dev isaachatilima/laracanon
+```
+
+To follow unreleased changes on `main`, configure a [VCS repository](https://getcomposer.org/doc/05-repositories.md#vcs):
 
 ```sh
 composer config repositories.laracanon vcs git@github.com:IsaacHatilima/laracanon.git
@@ -23,8 +29,6 @@ composer require --dev isaachatilima/laracanon:@dev
 ```
 
 Laravel discovers the service provider automatically. Installing Laracanon alone installs no item dependencies, rules, skills, or configuration files. Boost is installed as an application development dependency when `canon:install` first needs it.
-
-After a future registry release, installation will be `composer require --dev isaachatilima/laracanon`. This package has not been published.
 
 ## Commands
 
