@@ -1,4 +1,16 @@
-# Laracanon
+<h1 align="center">Laracanon</h1>
+
+<p align="center">
+  <img src="docs/images/laracanon.png" alt="Laracanon logo" width="260" height="260">
+</p>
+
+<p align="center">
+  <a href="https://github.com/IsaacHatilima/laracanon/actions/workflows/tests.yml"><img src="https://github.com/IsaacHatilima/laracanon/actions/workflows/tests.yml/badge.svg?branch=main&amp;event=push" alt="Tests"></a>
+  <a href="https://packagist.org/packages/isaachatilima/laracanon"><img src="https://img.shields.io/packagist/v/isaachatilima/laracanon?label=stable" alt="Latest stable version"></a>
+  <a href="https://packagist.org/packages/isaachatilima/laracanon"><img src="https://img.shields.io/packagist/dt/isaachatilima/laracanon" alt="Total downloads"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/packagist/l/isaachatilima/laracanon" alt="License"></a>
+  <a href="https://packagist.org/packages/isaachatilima/laracanon"><img src="https://img.shields.io/packagist/dependency-v/isaachatilima/laracanon/php" alt="PHP requirement"></a>
+</p>
 
 `isaachatilima/laracanon` is a Composer development package for existing Laravel applications. It installs selected pieces of a reusable toolkit: architecture conventions, package integrations, development practices, and authored workflows.
 
