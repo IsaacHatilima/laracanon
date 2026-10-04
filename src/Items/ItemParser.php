@@ -11,7 +11,7 @@ use Symfony\Component\Yaml\Yaml;
 final class ItemParser
 {
     private const FRONTMATTER_KEYS = [
-        'name', 'description', 'paths', 'dependencies', 'minimum_versions', 'composer_plugins', 'skill_name', 'overrides_skill', 'sample',
+        'name', 'description', 'paths', 'dependencies', 'minimum_versions', 'composer_plugins', 'neon_updates', 'skill_name', 'overrides_skill', 'sample',
     ];
 
     public function parse(string $markdown, ?string $sourcePath = null): Item
@@ -59,6 +59,8 @@ final class ItemParser
         $minimumVersions = $this->minimumVersions(array_key_exists('minimum_versions', $metadata) ? $metadata['minimum_versions'] : [], $dependencies, $sourcePath);
         $composerPlugins = $this->composerPlugins(array_key_exists('composer_plugins', $metadata) ? $metadata['composer_plugins'] : [], $dependencies, $sourcePath);
         $sections = $this->sections($matches[2], $sourcePath);
+        $files = $this->files($sections['Files'] ?? null, $sourcePath);
+        $neonUpdates = $this->neonUpdates(array_key_exists('neon_updates', $metadata) ? $metadata['neon_updates'] : [], $files, $sourcePath);
         $overridesSkill = $this->boolean($metadata, 'overrides_skill', $sourcePath);
         $sample = $this->boolean($metadata, 'sample', $sourcePath);
         $skillName = $metadata['skill_name'] ?? null;
@@ -88,9 +90,10 @@ final class ItemParser
             sourceHash: $sourceHash,
             overridesSkill: $overridesSkill,
             sample: $sample,
-            files: $this->files($sections['Files'] ?? null, $sourcePath),
+            files: $files,
             minimumVersions: $minimumVersions,
             composerPlugins: $composerPlugins,
+            neonUpdates: $neonUpdates,
         );
     }
 
@@ -219,6 +222,80 @@ final class ItemParser
         }
 
         return $metadata[$key] ?? false;
+    }
+
+    /**
+     * @param  array<string, string>  $files
+     * @return array<string, array{candidates: list<string>, set: array<string, int|string|bool|float|null>}>
+     */
+    private function neonUpdates(mixed $value, array $files, ?string $sourcePath): array
+    {
+        if (! is_array($value) || ($value !== [] && array_is_list($value))) {
+            throw $this->error('neon_updates must map declared root NEON file destinations to candidates and set mappings.', $sourcePath);
+        }
+
+        foreach ($value as $destination => $update) {
+            if (! is_string($destination) || ! $this->isRootNeon($destination) || ! array_key_exists($destination, $files)) {
+                throw $this->error('neon_updates keys must reference root NEON destinations declared in ## Files.', $sourcePath);
+            }
+
+            if (! is_array($update) || array_is_list($update)
+                || array_diff(array_keys($update), ['candidates', 'set']) !== []
+                || ! array_key_exists('candidates', $update) || ! array_key_exists('set', $update)) {
+                throw $this->error('neon_updates.'.$destination.' must contain only candidates and set.', $sourcePath);
+            }
+
+            $candidates = $update['candidates'];
+            if (! is_array($candidates) || ! array_is_list($candidates) || $candidates === []) {
+                throw $this->error('neon_updates.'.$destination.'.candidates must be a nonempty ordered list of root NEON filenames.', $sourcePath);
+            }
+
+            foreach ($candidates as $candidate) {
+                if (! is_string($candidate) || ! $this->isRootNeon($candidate)) {
+                    throw $this->error('neon_updates candidates must be safe canonical root filenames ending .neon or .neon.dist.', $sourcePath);
+                }
+            }
+
+            if ($candidates[0] !== $destination) {
+                throw $this->error('neon_updates.'.$destination.'.candidates must start with its declared default destination.', $sourcePath);
+            }
+
+            if (count(array_unique($candidates)) !== count($candidates)) {
+                throw $this->error('neon_updates.'.$destination.'.candidates must contain unique filenames.', $sourcePath);
+            }
+
+            $set = $update['set'];
+            if (! is_array($set) || $set === [] || array_is_list($set)) {
+                throw $this->error('neon_updates.'.$destination.'.set must be a nonempty mapping of dotted identifiers to scalar values.', $sourcePath);
+            }
+
+            $setPaths = [];
+            foreach ($set as $path => $scalar) {
+                if (! is_string($path) || ! preg_match('/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/D', $path)) {
+                    throw $this->error('neon_updates set paths must contain dot-separated mapping identifiers.', $sourcePath);
+                }
+
+                if (! is_scalar($scalar) && $scalar !== null) {
+                    throw $this->error('neon_updates set values must be strings, integers, floats, booleans, or null.', $sourcePath);
+                }
+                if (is_float($scalar) && ! is_finite($scalar)) {
+                    throw $this->error('neon_updates set floats must be finite values.', $sourcePath);
+                }
+                foreach ($setPaths as $previousPath) {
+                    if (str_starts_with($path, $previousPath.'.') || str_starts_with($previousPath, $path.'.')) {
+                        throw $this->error('neon_updates set paths must not overlap parent and child mappings.', $sourcePath);
+                    }
+                }
+                $setPaths[] = $path;
+            }
+        }
+
+        return $value;
+    }
+
+    private function isRootNeon(string $path): bool
+    {
+        return ! str_contains($path, '/') && ItemFilePath::isConfiguration($path);
     }
 
     /** @return array<string, string|null> */

@@ -2,7 +2,9 @@
 name: phpstan
 description: PHPStan and Larastan with level 10 Laravel analysis.
 paths:
+  - 'phpstan.neon'
   - 'phpstan.neon.dist'
+  - 'phpstan.dist.neon'
   - 'app/**/*.php'
 dependencies:
   development:
@@ -10,6 +12,14 @@ dependencies:
     - larastan/larastan
 minimum_versions:
   phpstan/phpstan: '2.0.0'
+neon_updates:
+  phpstan.neon:
+    candidates:
+      - phpstan.neon
+      - phpstan.neon.dist
+      - phpstan.dist.neon
+    set:
+      parameters.level: 10
 ---
 
 ## Examples
@@ -25,13 +35,15 @@ php artisan canon:install phpstan
 
 Missing packages resolve to the latest compatible stable releases. Existing requirements and installed versions are preserved. [Level 10 requires PHPStan 2](https://phpstan.org/user-guide/rule-levels); the minimum-version check reports an incompatible existing version and skips this item's configuration rather than upgrading dependencies or changing the requested level.
 
-The literal file below installs as `phpstan.neon.dist` in the application root. Repeat installs leave matching content unchanged, update unchanged managed content, and report conflicts when project edits differ. PHPStan uses a local `phpstan.neon` before `phpstan.neon.dist`, so an existing local configuration retains precedence; see [PHPStan's configuration discovery](https://phpstan.org/config-reference#config-file).
+Laracanon uses the first existing configuration in PHPStan's discovery order: `phpstan.neon`, `phpstan.neon.dist`, then `phpstan.dist.neon`. It changes only `parameters.level` to `10`, preserving includes, paths, exclusions, comments, and other project settings. It creates no second configuration when one of those files already exists; see [PHPStan's configuration discovery](https://phpstan.org/config-reference#config-file). A malformed or unsupported configuration is reported and preserved.
+
+If none of those configurations exists, the literal default below installs as `phpstan.neon` in the application root. Adopted existing configurations track the selected path and managed level value: unrelated edits remain permitted, while an edited managed level is reported as a conflict and is never silently reset. Configurations created by Laracanon retain whole-file ownership, so any local edits are preserved and reported as conflicts. Dry runs report the proposed change without writing files.
 
 Run analysis on changed or affected application paths using the installed runner. Installation adds no Composer scripts and runs no analysis. This item contains no project Rules or authored Skill section; dependency-provided Boost resources are discovered when available.
 
 ## Files
 
-### phpstan.neon.dist
+### phpstan.neon
 
 ```neon
 includes:
