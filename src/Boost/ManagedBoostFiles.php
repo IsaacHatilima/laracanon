@@ -9,6 +9,10 @@ use RuntimeException;
 /** Ownership for derived Boost outputs, separate from Laracanon's item files. */
 class ManagedBoostFiles
 {
+    // Verified against https://github.com/laravel/laravel/blob/v13.10.1/AGENTS.md.
+    // Only the unchanged scaffold block is eligible for initial adoption.
+    private const LARAVEL_BOOTSTRAP_HASH = 'e4f9841acc3d38f50c4b6ce4853876f7c12a4ce8a89dfa53613dbb9a7ea72031';
+
     /** @var array<string, string> */
     private array $hashes;
 
@@ -67,8 +71,12 @@ class ManagedBoostFiles
         $newBlock = $desired[0] ?? throw new RuntimeException('Boost generated guidelines without the expected ownership marker.');
         preg_match('/<laravel-boost-guidelines>.*?<\/laravel-boost-guidelines>/s', $trustedBaseline ?? '', $baseline);
         $key = $path.'#boost-guidelines';
+        $officialBootstrap = ! isset($this->hashes[$key])
+            && substr_count($current, '<laravel-boost-guidelines>') === 1
+            && substr_count($current, '</laravel-boost-guidelines>') === 1
+            && hash('sha256', $block) === self::LARAVEL_BOOTSTRAP_HASH;
 
-        if (count($matches[0]) > 1 || ($block !== '' && $block !== $newBlock && ($this->hashes[$key] ?? null) !== hash('sha256', $block) && $block !== ($baseline[0] ?? null))) {
+        if (count($matches[0]) > 1 || ($block !== '' && $block !== $newBlock && ($this->hashes[$key] ?? null) !== hash('sha256', $block) && $block !== ($baseline[0] ?? null) && ! $officialBootstrap)) {
             $this->conflicts[] = 'Conflict: Boost block in '.$path.' is locally modified or has no verifiable managed baseline; preserved.';
 
             return false;
