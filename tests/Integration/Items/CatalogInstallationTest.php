@@ -77,6 +77,12 @@ final class CatalogInstallationTest extends TestCase
 
         self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
         self::assertCount(count($items), $report->items);
+        $requires = array_values(array_filter($this->commands, static fn (array $command): bool => $command[1] === 'require'));
+        self::assertCount(2, $requires, 'The complete catalog resolves new dependencies once per Composer requirement section.');
+        self::assertSame(['spatie/laravel-data:*@stable'], $this->packageArguments($requires[0]));
+        self::assertNotContains('--dev', $requires[0]);
+        self::assertSame(['nunomaduro/phpinsights:*@stable', 'phpstan/phpstan:*@stable', 'larastan/larastan:*@stable'], $this->packageArguments($requires[1]));
+        self::assertContains('--dev', $requires[1]);
         $index = $this->read('.ai/rules/index.md');
 
         foreach ($items as $item) {
@@ -196,9 +202,10 @@ final class CatalogInstallationTest extends TestCase
 
         self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
         self::assertSame(['insights' => 'installed', 'phpstan' => 'installed'], $report->items);
-        self::assertCount(5, $this->commands);
-        self::assertSame(['config', 'config', 'require', 'require', 'require'], array_column($this->commands, 1));
-        self::assertSame(['nunomaduro/phpinsights:*@stable', 'phpstan/phpstan:*@stable', 'larastan/larastan:*@stable'], array_column(array_slice($this->commands, 2), 2));
+        self::assertCount(3, $this->commands);
+        self::assertSame(['config', 'config', 'require'], array_column($this->commands, 1));
+        self::assertSame(['nunomaduro/phpinsights:*@stable', 'phpstan/phpstan:*@stable', 'larastan/larastan:*@stable'], $this->packageArguments($this->commands[2]));
+        self::assertContains('--dev', $this->commands[2]);
         self::assertSame(['config/insights.php (installed)', 'phpstan.neon.dist (installed)'], $report->files);
         self::assertFileExists($this->project.'/.ai/rules/index.md');
         self::assertSame(['post-update-cmd' => ['@php artisan existing:workflow']], json_decode($this->read('composer.json'), true)['scripts']);
@@ -228,11 +235,9 @@ NEON;
         $report = $this->installer()->install($this->project, ['phpstan']);
 
         self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertCount(2, $this->commands);
-        self::assertSame(['phpstan/phpstan:*@stable', 'larastan/larastan:*@stable'], array_column($this->commands, 2));
-        foreach ($this->commands as $command) {
-            self::assertContains('--dev', $command);
-        }
+        self::assertCount(1, $this->commands);
+        self::assertSame(['phpstan/phpstan:*@stable', 'larastan/larastan:*@stable'], $this->packageArguments($this->commands[0]));
+        self::assertContains('--dev', $this->commands[0]);
         $composer = json_decode($this->read('composer.json'), true);
         self::assertSame($existingRequirements, $composer['require']);
         self::assertSame(['laravel/boost' => '^2.10', 'phpstan/phpstan' => '*@stable', 'larastan/larastan' => '*@stable'], $composer['require-dev']);
@@ -253,7 +258,7 @@ NEON;
         $repeat = $this->installer()->install($this->project, ['phpstan']);
 
         self::assertTrue($repeat->successful(), implode("\n", array_merge($repeat->failures, $repeat->conflicts)));
-        self::assertCount(2, $this->commands);
+        self::assertCount(1, $this->commands, 'Repeated installation does not resolve the installed development dependencies again.');
         self::assertSame($before, $this->snapshot());
         self::assertSame(['phpstan.neon.dist (unchanged)'], $repeat->files);
     }
@@ -640,20 +645,31 @@ MARKDOWN);
 
             return new ProcessResult(0, 'Mocked declared named plugin configuration.');
         }
-        [$package, $constraint] = explode(':', $command[2], 2);
-        if ($package === 'nunomaduro/phpinsights') {
-            self::assertArrayHasKey('dealerdirect/phpcodesniffer-composer-installer', json_decode($this->read('composer.json'), true)['config']['allow-plugins'] ?? [], 'The fresh PHP Insights install must resolve its plugin policy before Composer require.');
+        self::assertSame(['composer', 'require'], array_slice($command, 0, 2));
+        $arguments = $this->packageArguments($command);
+        self::assertNotEmpty($arguments);
+        foreach ($arguments as $argument) {
+            [$package, $constraint] = explode(':', $argument, 2);
+            if ($package === 'nunomaduro/phpinsights') {
+                self::assertArrayHasKey('dealerdirect/phpcodesniffer-composer-installer', json_decode($this->read('composer.json'), true)['config']['allow-plugins'] ?? [], 'The fresh PHP Insights install must resolve its plugin policy before Composer require.');
+            }
+            $version = match ($package) {
+                'spatie/laravel-data' => '4.21.0',
+                'nunomaduro/phpinsights' => '2.15.0',
+                'phpstan/phpstan' => '2.2.16',
+                'larastan/larastan' => 'v3.12.2',
+                default => '1.2.3',
+            };
+            $this->simulateDependencyInstall($package, in_array('--dev', $command, true) ? 'development' : 'runtime', $constraint, $version);
         }
-        $version = match ($package) {
-            'spatie/laravel-data' => '4.21.0',
-            'nunomaduro/phpinsights' => '2.15.0',
-            'phpstan/phpstan' => '2.2.16',
-            'larastan/larastan' => 'v3.12.2',
-            default => '1.2.3',
-        };
-        $this->simulateDependencyInstall($package, in_array('--dev', $command, true) ? 'development' : 'runtime', $constraint, $version);
 
         return new ProcessResult(0, 'Mocked compatible stable dependency installation.');
+    }
+
+    /** @return list<string> */
+    private function packageArguments(array $command): array
+    {
+        return array_values(array_filter(array_slice($command, 2), static fn (string $argument): bool => ! str_starts_with($argument, '--')));
     }
 
     private function simulateComposerInstall(string $constraint, string $version): void
