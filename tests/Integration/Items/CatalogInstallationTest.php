@@ -14,10 +14,8 @@ use Isaachatilima\Laracanon\Support\ProcessResult;
 use Isaachatilima\Laracanon\Support\ProcessRunner;
 use Laravel\Boost\BoostManager;
 use Laravel\Boost\BoostServiceProvider;
-use Laravel\Boost\Rules\RuleFrontmatter;
 use Laravel\Roster\ProjectManager;
 use Orchestra\Testbench\TestCase;
-use PHPUnit\Framework\Attributes\DataProvider;
 
 final class CatalogInstallationTest extends TestCase
 {
@@ -67,586 +65,89 @@ final class CatalogInstallationTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_complete_catalog_installs_distinct_rules_and_only_authored_workflows_with_native_index(): void
+    public function test_shared_catalog_installs_factory_and_laravel_skills_with_native_agents(): void
     {
-        $catalog = $this->catalog();
-        $items = $catalog->all();
-        self::assertArrayHasKey('architecture', $items);
-        self::assertArrayHasKey('actions', $items);
-        self::assertArrayHasKey('data', $items);
+        $items = $this->catalog()->all();
+        self::assertArrayHasKey('factory', $items);
+        self::assertArrayHasKey('laravel-actions', $items);
+        self::assertArrayNotHasKey('plans', $items);
+        $composer = $this->read('composer.json');
         $report = $this->installer()->install($this->project);
 
         self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        self::assertSame($composer, $this->read('composer.json'));
+        self::assertSame([], $this->commands);
         self::assertCount(count($items), $report->items);
-        $requires = array_values(array_filter($this->commands, static fn (array $command): bool => $command[1] === 'require'));
-        self::assertCount(2, $requires, 'The complete catalog resolves new dependencies once per Composer requirement section.');
-        self::assertSame(['spatie/laravel-data:*@stable'], $this->packageArguments($requires[0]));
-        self::assertNotContains('--dev', $requires[0]);
-        self::assertSame(['nunomaduro/phpinsights:*@stable', 'phpstan/phpstan:*@stable', 'larastan/larastan:*@stable'], $this->packageArguments($requires[1]));
-        self::assertContains('--dev', $requires[1]);
-        $index = $this->read('.ai/rules/index.md');
-
         foreach ($items as $item) {
-            self::assertFalse($item->sample, 'The production catalog contains conventions rather than test demonstrations.');
-            if ($item->rules !== null) {
-                $rule = '.ai/rules/laracanon-'.$item->name.'.md';
-                self::assertFileExists($this->project.'/'.$rule);
-                $rendered = RuleFrontmatter::parse($this->read($rule));
-                self::assertNotEmpty($rendered['paths']);
-                self::assertStringContainsString('| '.implode(', ', $rendered['paths']).' | '.$rule.' |', $index);
-            } else {
-                self::assertFileDoesNotExist($this->project.'/.ai/rules/laracanon-'.$item->name.'.md');
-            }
-
-            if ($item->skill === null) {
-                self::assertFileDoesNotExist($this->project.'/.ai/skills/laracanon-'.$item->name.'/SKILL.md');
-            } else {
-                foreach (['.ai/skills/', '.agents/skills/'] as $directory) {
-                    $path = $directory.$item->skillName.'/SKILL.md';
-                    self::assertFileExists($this->project.'/'.$path);
-                    self::assertStringContainsString($item->skill, $this->read($path));
-                }
-            }
-
+            self::assertTrue($item->name === 'factory' || str_starts_with($item->name, 'laravel-'));
             foreach ($item->files as $path => $contents) {
-                self::assertFileExists($this->project.'/'.$path);
-                self::assertSame($contents, $this->read($path));
+                self::assertSame($contents, $this->read($path), $path);
             }
         }
-
-        self::assertStringContainsString('| **/* | .ai/rules/project-global.md |', $index);
-        self::assertStringContainsString('@.ai/rules/index.md', $this->read('AGENTS.md'));
+        self::assertCount(8, glob($this->project.'/.claude/agents/*.md'));
+        self::assertCount(8, glob($this->project.'/.codex/agents/*.toml'));
+        self::assertStringContainsString('disable-model-invocation: true', $this->read('.agents/skills/factory/SKILL.md'));
+        self::assertStringNotContainsString('| nest/', $this->read('.agents/skills/catalog.md'));
     }
 
-    public function test_insights_installs_only_its_development_dependency_and_literal_configuration_with_native_boost(): void
+    public function test_selected_skill_installs_support_files_without_modifying_project_configuration(): void
     {
-        $item = $this->catalog()->find('insights');
-        $contents = $item->files['config/insights.php'];
-        self::assertSame(5743, strlen($contents));
-        self::assertSame('9b51c64f64e8c8349ad6b33bb330b270b3a77292130a1eb3ef3d8351dd597623', hash('sha256', $contents));
+        $this->write('config/insights.php', '<?php return ["project" => true];');
+        $this->write('phpstan.neon', "parameters:\n    level: 7\n");
+        $report = $this->installer()->install($this->project, ['laravel-insights', 'laravel-phpstan', 'laravel-api-responses']);
+
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        self::assertSame([], $this->commands);
+        self::assertSame('<?php return ["project" => true];', $this->read('config/insights.php'));
+        self::assertSame("parameters:\n    level: 7\n", $this->read('phpstan.neon'));
+        self::assertFileExists($this->project.'/.agents/skills/laravel-insights/insights.php');
+        self::assertFileExists($this->project.'/.agents/skills/laravel-phpstan/phpstan.neon');
+        self::assertFileExists($this->project.'/.agents/skills/laravel-api-responses/templates/ApiResponse.php');
+        self::assertFileDoesNotExist($this->project.'/.agents/skills/factory/SKILL.md');
+    }
+
+    public function test_repeat_install_is_idempotent_and_preserves_a_locally_edited_native_skill(): void
+    {
+        $installer = $this->installer();
+        self::assertTrue($installer->install($this->project)->successful());
+        $before = $this->snapshot();
+        self::assertTrue($installer->install($this->project)->successful());
+        self::assertSame($before, $this->snapshot());
+
+        $path = '.agents/skills/factory/AGENT.md';
+        $this->write($path, 'Local workflow changes.');
+        $report = $installer->install($this->project, ['factory']);
+        self::assertFalse($report->successful());
+        self::assertNotEmpty($report->conflicts);
+        self::assertSame('Local workflow changes.', $this->read($path));
+    }
+
+    public function test_shared_catalog_dry_run_has_no_file_or_process_side_effects(): void
+    {
+        $before = $this->snapshot();
+        $report = $this->installer()->install($this->project, dryRun: true);
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        self::assertNotEmpty($report->skills);
+        self::assertSame([], $this->commands);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function test_shared_skill_does_not_override_a_dependency_skill_with_the_same_name(): void
+    {
         $composer = json_decode($this->read('composer.json'), true);
-        $composer['config'] = ['sort-packages' => true, 'allow-plugins' => ['pestphp/pest-plugin' => true]];
+        $composer['require-dev']['example/skill-package'] = '^1.0';
         $this->writeJson('composer.json', $composer);
-        $report = $this->installer()->install($this->project, ['insights']);
+        $this->write('vendor/example/skill-package/resources/boost/skills/laravel-actions/SKILL.md', "---\nname: laravel-actions\ndescription: Dependency skill.\n---\n\nDependency instructions.\n");
 
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertCount(3, $this->commands);
-        self::assertSame(['composer', 'config', '--no-plugins', '--no-scripts', '--no-interaction', 'allow-plugins'], $this->commands[0]);
-        self::assertSame(['composer', 'config', '--no-plugins', '--no-scripts', '--no-interaction', 'allow-plugins.dealerdirect/phpcodesniffer-composer-installer', 'true'], $this->commands[1]);
-        self::assertSame('nunomaduro/phpinsights:*@stable', $this->commands[2][2]);
-        self::assertContains('--dev', $this->commands[2]);
-        $composer = json_decode($this->read('composer.json'), true);
-        self::assertSame('*@stable', $composer['require-dev']['nunomaduro/phpinsights']);
-        self::assertArrayNotHasKey('nunomaduro/phpinsights', $composer['require']);
-        self::assertSame(['php' => '^8.3', 'laravel/framework' => '^13.0'], $composer['require']);
-        self::assertSame('^2.10', $composer['require-dev']['laravel/boost']);
-        self::assertSame(['post-update-cmd' => ['@php artisan existing:workflow']], $composer['scripts']);
-        self::assertSame(['sort-packages' => true, 'allow-plugins' => ['pestphp/pest-plugin' => true, 'dealerdirect/phpcodesniffer-composer-installer' => true]], $composer['config']);
-        self::assertSame($contents, $this->read('config/insights.php'));
-        self::assertSame(['config/insights.php (installed)'], $report->files);
-        self::assertSame([], $report->rules);
-        self::assertSame([], $report->skills);
-        self::assertFileDoesNotExist($this->project.'/.ai/rules/laracanon-insights.md');
-        self::assertFileDoesNotExist($this->project.'/.ai/skills/laracanon-insights/SKILL.md');
-        self::assertStringContainsString('| **/* | .ai/rules/project-global.md |', $this->read('.ai/rules/index.md'));
-        self::assertStringNotContainsString('laracanon-insights.md', $this->read('.ai/rules/index.md'));
-        $state = json_decode($this->read('.ai/laracanon/state.json'), true);
-        self::assertSame(['hash' => hash('sha256', $contents), 'owner' => 'insights'], $state['files']['config/insights.php']);
-        $before = $this->snapshot();
-
-        $repeat = $this->installer()->install($this->project, ['insights']);
-
-        self::assertTrue($repeat->successful(), implode("\n", array_merge($repeat->failures, $repeat->conflicts)));
-        self::assertCount(3, $this->commands, 'Repeated installation does not read or rewrite the plugin policy.');
-        self::assertSame($before, $this->snapshot());
-        self::assertSame(['config/insights.php (unchanged)'], $repeat->files);
-    }
-
-    public function test_insights_preserves_an_existing_project_configuration_and_reports_a_conflict(): void
-    {
-        $this->simulateDependencyInstall('nunomaduro/phpinsights', 'development', '^2.14', '2.15.0');
-        $manifest = $this->read('composer.json');
-        $lock = $this->read('composer.lock');
-        $this->write('config/insights.php', "<?php\nreturn ['preset' => 'project'];\n");
-        $report = $this->installer()->install($this->project, ['insights']);
-
+        $report = $this->installer()->install($this->project, ['laravel-actions']);
         self::assertFalse($report->successful());
-        self::assertSame('conflict', $report->items['insights']);
-        self::assertCount(1, $report->conflicts);
-        self::assertStringContainsString('config/insights.php: locally modified or unowned file preserved', $report->conflicts[0]);
-        self::assertSame("<?php\nreturn ['preset' => 'project'];\n", $this->read('config/insights.php'));
-        self::assertSame([], $this->commands);
-        self::assertSame($manifest, $this->read('composer.json'));
-        self::assertSame($lock, $this->read('composer.lock'));
-        $state = json_decode($this->read('.ai/laracanon/state.json'), true);
-        self::assertSame([], $state['items']['insights']['files']);
-        self::assertArrayNotHasKey('config/insights.php', $state['files']);
+        self::assertStringContainsString('package-provided skill preserved', implode("\n", $report->conflicts));
+        self::assertFileDoesNotExist($this->project.'/.ai/skills/laravel-actions/SKILL.md');
     }
 
-    public function test_insights_dry_run_plans_configuration_without_launching_processes_or_writing_files(): void
+    private function catalog(): ItemCatalog
     {
-        $before = $this->snapshot();
-        $report = $this->installer()->install($this->project, ['insights'], true);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertSame(['insights' => 'planned'], $report->items);
-        self::assertStringContainsString('nunomaduro/phpinsights to require-dev', implode("\n", $report->dependencies));
-        self::assertStringContainsString('dealerdirect/phpcodesniffer-composer-installer', implode("\n", array_merge($report->dependencies, $report->notes)));
-        self::assertSame(['config/insights.php (installed)'], $report->files);
-        self::assertSame([], $this->commands);
-        self::assertSame($before, $this->snapshot());
-    }
-
-    public function test_fresh_insights_and_phpstan_install_together_after_the_named_plugin_is_configured(): void
-    {
-        $report = $this->installer()->install($this->project, ['insights', 'phpstan']);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertSame(['insights' => 'installed', 'phpstan' => 'installed'], $report->items);
-        self::assertCount(3, $this->commands);
-        self::assertSame(['config', 'config', 'require'], array_column($this->commands, 1));
-        self::assertSame(['nunomaduro/phpinsights:*@stable', 'phpstan/phpstan:*@stable', 'larastan/larastan:*@stable'], $this->packageArguments($this->commands[2]));
-        self::assertContains('--dev', $this->commands[2]);
-        self::assertSame(['config/insights.php (installed)', 'phpstan.neon (installed)'], $report->files);
-        self::assertFileExists($this->project.'/.ai/rules/index.md');
-        self::assertSame(['post-update-cmd' => ['@php artisan existing:workflow']], json_decode($this->read('composer.json'), true)['scripts']);
-    }
-
-    public function test_phpstan_installs_development_dependencies_and_the_exact_root_configuration_with_native_boost(): void
-    {
-        $expected = <<<'NEON'
-includes:
-    - vendor/larastan/larastan/extension.neon
-    - vendor/nesbot/carbon/extension.neon
-
-parameters:
-    level: 10
-    paths:
-        - app
-    excludePaths:
-        - tests/*
-        - database/*
-        - config/*
-        - vendor/*
-        - app/Providers/*
-NEON;
-        $this->simulateDependencyInstall('nesbot/carbon', 'runtime', '^3.10', '3.14.2');
-        $existingRequirements = json_decode($this->read('composer.json'), true)['require'];
-        $report = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertCount(1, $this->commands);
-        self::assertSame(['phpstan/phpstan:*@stable', 'larastan/larastan:*@stable'], $this->packageArguments($this->commands[0]));
-        self::assertContains('--dev', $this->commands[0]);
-        $composer = json_decode($this->read('composer.json'), true);
-        self::assertSame($existingRequirements, $composer['require']);
-        self::assertSame(['laravel/boost' => '^2.10', 'phpstan/phpstan' => '*@stable', 'larastan/larastan' => '*@stable'], $composer['require-dev']);
-        self::assertSame(['post-update-cmd' => ['@php artisan existing:workflow']], $composer['scripts']);
-        self::assertSame($expected."\n", $this->read('phpstan.neon'));
-        self::assertFileDoesNotExist($this->project.'/phpstan.neon.dist');
-        self::assertFileDoesNotExist($this->project.'/phpstan.dist.neon');
-        self::assertSame(['phpstan.neon (installed)'], $report->files);
-        self::assertSame([], $report->rules);
-        self::assertSame([], $report->skills);
-        self::assertFileDoesNotExist($this->project.'/.ai/rules/laracanon-phpstan.md');
-        self::assertFileDoesNotExist($this->project.'/.ai/skills/laracanon-phpstan/SKILL.md');
-        self::assertStringContainsString('| **/* | .ai/rules/project-global.md |', $this->read('.ai/rules/index.md'));
-        self::assertStringNotContainsString('laracanon-phpstan.md', $this->read('.ai/rules/index.md'));
-        $state = json_decode($this->read('.ai/laracanon/state.json'), true);
-        self::assertSame(['hash' => hash('sha256', $expected."\n"), 'owner' => 'phpstan'], $state['files']['phpstan.neon']);
-        $before = $this->snapshot();
-
-        $repeat = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertTrue($repeat->successful(), implode("\n", array_merge($repeat->failures, $repeat->conflicts)));
-        self::assertCount(1, $this->commands, 'Repeated installation does not resolve the installed development dependencies again.');
-        self::assertSame($before, $this->snapshot());
-        self::assertSame(['phpstan.neon (unchanged)'], $repeat->files);
-    }
-
-    public function test_phpstan_preserves_existing_dependency_versions_and_reuses_unowned_configuration(): void
-    {
-        $this->simulateDependencyInstall('phpstan/phpstan', 'development', '^2.1', 'v2.2.16');
-        $this->simulateDependencyInstall('larastan/larastan', 'development', '^3.10', 'v3.12.2');
-        $manifest = $this->read('composer.json');
-        $lock = $this->read('composer.lock');
-        $this->write('phpstan.neon.dist', "parameters:\n    level: 8\n");
-        $report = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertSame('installed', $report->items['phpstan']);
-        self::assertSame([], $report->conflicts);
-        self::assertSame("parameters:\n    level: 10\n", $this->read('phpstan.neon.dist'));
-        self::assertFileDoesNotExist($this->project.'/phpstan.neon');
-        self::assertSame([], $this->commands);
-        self::assertSame($manifest, $this->read('composer.json'));
-        self::assertSame($lock, $this->read('composer.lock'));
-        $state = json_decode($this->read('.ai/laracanon/state.json'), true);
-        self::assertSame(['phpstan.neon.dist'], $state['items']['phpstan']['files']);
-        self::assertSame('phpstan', $state['files']['phpstan.neon.dist']['owner']);
-    }
-
-    public function test_phpstan_dry_run_plans_root_configuration_and_development_dependencies_without_mutations(): void
-    {
-        $before = $this->snapshot();
-        $report = $this->installer()->install($this->project, ['phpstan'], true);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertSame(['phpstan' => 'planned'], $report->items);
-        self::assertCount(2, $report->dependencies);
-        self::assertStringContainsString('phpstan/phpstan to require-dev', $report->dependencies[0]);
-        self::assertStringContainsString('larastan/larastan to require-dev', $report->dependencies[1]);
-        self::assertStringContainsString('phpstan/phpstan minimum 2.0.0 will be verified after dependency installation', implode("\n", $report->notes));
-        self::assertSame(['phpstan.neon (installed)'], $report->files);
-        self::assertSame([], $this->commands);
-        self::assertSame($before, $this->snapshot());
-    }
-
-    public function test_phpstan_one_is_rejected_before_composer_boost_or_configuration_mutations(): void
-    {
-        $this->simulateDependencyInstall('phpstan/phpstan', 'development', '^1.12', '1.12.33');
-        $this->simulateDependencyInstall('larastan/larastan', 'development', '^2.11', '2.11.2');
-        $this->write('phpstan.neon.dist', "parameters:\n    level: 6\n");
-        $before = $this->snapshot();
-
-        foreach ([false, true] as $dryRun) {
-            $report = $this->installer()->install($this->project, ['phpstan'], $dryRun);
-
-            self::assertFalse($report->successful());
-            self::assertSame(['phpstan' => 'incompatible dependencies'], $report->items);
-            self::assertStringContainsString('phpstan/phpstan requires minimum 2.0.0, but 1.12.33 is installed', $report->failures[0]);
-            self::assertSame([], $report->files);
-            self::assertSame([], $report->resources);
-            self::assertSame($before, $this->snapshot());
-        }
-        self::assertSame([], $this->commands);
-    }
-
-    #[DataProvider('existingPhpstanConfigurations')]
-    public function test_phpstan_changes_only_the_level_in_an_existing_configuration(string $path): void
-    {
-        $contents = $this->existingPhpstanConfiguration();
-        $expected = str_replace('level: 7 # Project analysis level.', 'level: 10 # Project analysis level.', $contents);
-        $this->write($path, $contents);
-
-        $report = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertSame(['phpstan' => 'installed'], $report->items);
-        self::assertSame($expected, $this->read($path), 'Only the level scalar changes; comments, includes, paths, exclusions, and formatting remain byte-for-byte.');
-        self::assertSame([$path.' (updated)'], $report->files);
-        foreach (['phpstan.neon', 'phpstan.neon.dist', 'phpstan.dist.neon'] as $candidate) {
-            if ($candidate !== $path) {
-                self::assertFileDoesNotExist($this->project.'/'.$candidate, 'An existing PHPStan config must not produce a duplicate.');
-            }
-        }
-        $before = $this->snapshot();
-        $commands = $this->commands;
-
-        $repeat = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertTrue($repeat->successful(), implode("\n", array_merge($repeat->failures, $repeat->conflicts)));
-        self::assertSame([$path.' (unchanged)'], $repeat->files);
-        self::assertSame($commands, $this->commands);
-        self::assertSame($before, $this->snapshot());
-    }
-
-    /** @return array<string, array{string}> */
-    public static function existingPhpstanConfigurations(): array
-    {
-        return [
-            'local configuration' => ['phpstan.neon'],
-            'distribution configuration' => ['phpstan.neon.dist'],
-            'alternate distribution configuration' => ['phpstan.dist.neon'],
-        ];
-    }
-
-    public function test_phpstan_updates_the_active_config_and_preserves_unowned_secondary_configs(): void
-    {
-        $contents = $this->existingPhpstanConfiguration();
-        $distribution = "# Shared fallback\nparameters:\n    level: 3\n    paths: [app/Shared]\n";
-        $alternate = "parameters:\n    level: 4\n    paths: [app/Legacy]\n";
-        $this->write('phpstan.neon', $contents);
-        $this->write('phpstan.neon.dist', $distribution);
-        $this->write('phpstan.dist.neon', $alternate);
-
-        $report = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertSame(str_replace('level: 7 # Project analysis level.', 'level: 10 # Project analysis level.', $contents), $this->read('phpstan.neon'));
-        self::assertSame($distribution, $this->read('phpstan.neon.dist'));
-        self::assertSame($alternate, $this->read('phpstan.dist.neon'));
-        self::assertSame(['phpstan.neon (updated)'], $report->files);
-        $state = json_decode($this->read('.ai/laracanon/state.json'), true);
-        self::assertSame(['phpstan.neon'], $state['items']['phpstan']['files']);
-        self::assertArrayNotHasKey('phpstan.neon.dist', $state['files']);
-        self::assertArrayNotHasKey('phpstan.dist.neon', $state['files']);
-    }
-
-    public function test_phpstan_prefers_the_standard_distribution_config_to_the_alternate_filename(): void
-    {
-        $distribution = "parameters:\n    level: 5\n";
-        $alternate = "parameters:\n    level: 8\n";
-        $this->write('phpstan.neon.dist', $distribution);
-        $this->write('phpstan.dist.neon', $alternate);
-
-        $report = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertSame("parameters:\n    level: 10\n", $this->read('phpstan.neon.dist'));
-        self::assertSame($alternate, $this->read('phpstan.dist.neon'));
-        self::assertFileDoesNotExist($this->project.'/phpstan.neon');
-    }
-
-    public function test_phpstan_preserves_unrelated_edits_in_an_adopted_configuration_on_repeat(): void
-    {
-        $this->write('phpstan.neon', $this->existingPhpstanConfiguration());
-        $first = $this->installer()->install($this->project, ['phpstan']);
-        self::assertTrue($first->successful(), implode("\n", array_merge($first->failures, $first->conflicts)));
-        $edited = str_replace('app/Domain', 'app/ChangedDomain', $this->read('phpstan.neon'))."# A developer added this comment after installation.\n";
-        $this->write('phpstan.neon', $edited);
-        $before = $this->snapshot();
-
-        $repeat = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertTrue($repeat->successful(), implode("\n", array_merge($repeat->failures, $repeat->conflicts)));
-        self::assertSame(['phpstan.neon (unchanged)'], $repeat->files);
-        self::assertSame($edited, $this->read('phpstan.neon'));
-        self::assertSame($before, $this->snapshot(), 'Ownership of parameters.level must not claim the rest of an existing configuration.');
-    }
-
-    public function test_phpstan_reports_an_owned_level_edit_and_preserves_the_developer_value(): void
-    {
-        $this->write('phpstan.neon', $this->existingPhpstanConfiguration());
-        $first = $this->installer()->install($this->project, ['phpstan']);
-        self::assertTrue($first->successful(), implode("\n", array_merge($first->failures, $first->conflicts)));
-        $edited = str_replace('level: 10 # Project analysis level.', 'level: 8 # Project analysis level.', $this->read('phpstan.neon'));
-        $this->write('phpstan.neon', $edited);
-        $composer = $this->read('composer.json');
-        $lock = $this->read('composer.lock');
-        $commands = $this->commands;
-
-        foreach ([false, true] as $dryRun) {
-            $repeat = $this->installer()->install($this->project, ['phpstan'], $dryRun);
-
-            self::assertFalse($repeat->successful());
-            self::assertSame('conflict', $repeat->items['phpstan']);
-            self::assertCount(1, $repeat->conflicts);
-            self::assertStringContainsString('phpstan.neon', $repeat->conflicts[0]);
-            self::assertSame($edited, $this->read('phpstan.neon'));
-            self::assertSame($composer, $this->read('composer.json'));
-            self::assertSame($lock, $this->read('composer.lock'));
-            self::assertSame($commands, $this->commands);
-        }
-        self::assertFileDoesNotExist($this->project.'/phpstan.neon.dist');
-    }
-
-    public function test_phpstan_retains_full_file_ownership_when_it_created_the_configuration(): void
-    {
-        $first = $this->installer()->install($this->project, ['phpstan']);
-        self::assertTrue($first->successful(), implode("\n", array_merge($first->failures, $first->conflicts)));
-        $edited = $this->read('phpstan.neon')."# A local edit to a file created by Laracanon.\n";
-        $this->write('phpstan.neon', $edited);
-
-        $repeat = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertFalse($repeat->successful());
-        self::assertSame('conflict', $repeat->items['phpstan']);
-        self::assertCount(1, $repeat->conflicts);
-        self::assertSame($edited, $this->read('phpstan.neon'));
-    }
-
-    public function test_phpstan_dry_run_previews_only_the_existing_level_without_mutations(): void
-    {
-        $this->write('phpstan.neon', $this->existingPhpstanConfiguration());
-        $before = $this->snapshot();
-
-        $report = $this->installer()->install($this->project, ['phpstan'], true);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertSame(['phpstan' => 'planned'], $report->items);
-        self::assertSame(['phpstan.neon (updated)'], $report->files);
-        self::assertSame([], $this->commands);
-        self::assertSame($before, $this->snapshot());
-        self::assertFileDoesNotExist($this->project.'/phpstan.neon.dist');
-    }
-
-    public function test_malformed_phpstan_config_is_preserved_while_other_selected_items_complete(): void
-    {
-        $malformed = "parameters:\n    level: [\n";
-        $this->write('phpstan.neon', $malformed);
-
-        $report = $this->installer()->install($this->project, ['phpstan', 'actions']);
-
-        self::assertFalse($report->successful());
-        self::assertSame('partial failure', $report->items['phpstan']);
-        self::assertSame('installed', $report->items['actions']);
-        self::assertNotEmpty($report->failures);
-        self::assertSame($malformed, $this->read('phpstan.neon'));
-        self::assertFileDoesNotExist($this->project.'/phpstan.neon.dist');
-        self::assertFileExists($this->project.'/.ai/rules/laracanon-actions.md');
-        self::assertFileExists($this->project.'/.ai/skills/laracanon-actions/SKILL.md');
-        self::assertStringContainsString('laracanon-actions.md', $this->read('.ai/rules/index.md'));
-        $state = json_decode($this->read('.ai/laracanon/state.json'), true);
-        self::assertSame([], $state['items']['phpstan']['files']);
-        self::assertArrayNotHasKey('phpstan.neon', $state['files']);
-    }
-
-    public function test_phpstan_upgrade_reuses_a_legacy_managed_distribution_file_without_a_duplicate(): void
-    {
-        $legacy = array_values($this->catalog()->find('phpstan')->files)[0];
-        $this->writeLegacyPhpstanState($legacy);
-
-        $report = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertSame($legacy, $this->read('phpstan.neon.dist'));
-        self::assertSame(['phpstan.neon.dist (unchanged)'], $report->files);
-        self::assertFileDoesNotExist($this->project.'/phpstan.neon');
-        $before = $this->snapshot();
-
-        $repeat = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertTrue($repeat->successful(), implode("\n", array_merge($repeat->failures, $repeat->conflicts)));
-        self::assertSame($before, $this->snapshot());
-    }
-
-    public function test_phpstan_upgrade_removes_an_unchanged_old_managed_dist_when_a_local_config_is_active(): void
-    {
-        $legacy = array_values($this->catalog()->find('phpstan')->files)[0];
-        $this->writeLegacyPhpstanState($legacy);
-        $this->write('vendor/larastan/larastan/extension.neon', "# Mock installed extension with no includes.\n");
-        $this->write('project-analysis.neon', "# Mock existing project analysis configuration.\n");
-        $local = $this->existingPhpstanConfiguration();
-        $this->write('phpstan.neon', $local);
-        $before = $this->snapshot();
-        $preview = $this->installer()->install($this->project, ['phpstan'], true);
-        self::assertTrue($preview->successful(), implode("\n", array_merge($preview->failures, $preview->conflicts)));
-        self::assertSame($before, $this->snapshot());
-
-        $report = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertSame(str_replace('level: 7 # Project analysis level.', 'level: 10 # Project analysis level.', $local), $this->read('phpstan.neon'));
-        self::assertFileDoesNotExist($this->project.'/phpstan.neon.dist');
-        self::assertStringContainsString('phpstan.neon.dist: removed retired managed file.', implode("\n", $report->notes));
-        $state = json_decode($this->read('.ai/laracanon/state.json'), true);
-        self::assertSame(['phpstan.neon'], $state['items']['phpstan']['files']);
-        self::assertArrayNotHasKey('phpstan.neon.dist', $state['files']);
-    }
-
-    public function test_phpstan_upgrade_preserves_and_reports_an_edited_old_managed_distribution_file(): void
-    {
-        $legacy = array_values($this->catalog()->find('phpstan')->files)[0];
-        $this->writeLegacyPhpstanState($legacy);
-        $this->write('vendor/larastan/larastan/extension.neon', "# Mock installed extension with no includes.\n");
-        $this->write('project-analysis.neon', "# Mock existing project analysis configuration.\n");
-        $edited = $legacy."# Preserve this old managed configuration edit.\n";
-        $this->write('phpstan.neon.dist', $edited);
-        $local = $this->existingPhpstanConfiguration();
-        $this->write('phpstan.neon', $local);
-
-        $report = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertFalse($report->successful());
-        self::assertSame('conflict', $report->items['phpstan']);
-        self::assertCount(1, $report->conflicts);
-        self::assertStringContainsString('phpstan.neon.dist', $report->conflicts[0]);
-        self::assertSame($edited, $this->read('phpstan.neon.dist'));
-        self::assertSame(str_replace('level: 7 # Project analysis level.', 'level: 10 # Project analysis level.', $local), $this->read('phpstan.neon'));
-        $state = json_decode($this->read('.ai/laracanon/state.json'), true);
-        self::assertContains('phpstan.neon.dist', $state['items']['phpstan']['files']);
-        self::assertContains('phpstan.neon', $state['items']['phpstan']['files']);
-        self::assertSame(hash('sha256', $legacy), $state['files']['phpstan.neon.dist']['hash']);
-    }
-
-    public function test_phpstan_upgrade_preserves_a_legacy_managed_dist_included_by_the_active_config(): void
-    {
-        $legacy = array_values($this->catalog()->find('phpstan')->files)[0];
-        $this->writeLegacyPhpstanState($legacy);
-        $local = "includes:\n    - phpstan.neon.dist\n\nparameters:\n    level: 7\n    paths: [app/Domain]\n";
-        $this->write('phpstan.neon', $local);
-
-        $report = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertSame(str_replace('level: 7', 'level: 10', $local), $this->read('phpstan.neon'));
-        self::assertSame($legacy, $this->read('phpstan.neon.dist'), 'A referenced fallback config must remain available so the existing includes still work.');
-        $state = json_decode($this->read('.ai/laracanon/state.json'), true);
-        self::assertContains('phpstan.neon.dist', $state['items']['phpstan']['files']);
-        self::assertContains('phpstan.neon', $state['items']['phpstan']['files']);
-        $before = $this->snapshot();
-
-        $repeat = $this->installer()->install($this->project, ['phpstan']);
-
-        self::assertTrue($repeat->successful(), implode("\n", array_merge($repeat->failures, $repeat->conflicts)));
-        self::assertSame($before, $this->snapshot());
-    }
-
-    public function test_data_installs_runtime_dependency_and_project_workflow_without_overriding_package_skill(): void
-    {
-        $this->write('boost.json', '{"agents":["codex"],"guidelines":true,"mcp":false,"packages":[],"skills":[],"custom":{"keep":true}}');
-        // Simulate a dependency shipping its own guidance and skill in a future
-        // release; these fixtures are not claims about today's Spatie package.
-        $this->write('vendor/spatie/laravel-data/resources/boost/guidelines/core.md', "# Package usage\n\nGeneral package advice remains available.\n");
-        $this->write('vendor/spatie/laravel-data/resources/boost/skills/laravel-data-package/SKILL.md', "---\nname: laravel-data-package\ndescription: Follow the package-authored workflow.\n---\n\n# Package workflow\n\nUse package workflow instructions.\n");
-        $report = $this->installer()->install($this->project, ['data']);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        $composer = json_decode($this->read('composer.json'), true);
-        self::assertSame('*@stable', $composer['require']['spatie/laravel-data']);
-        self::assertArrayNotHasKey('spatie/laravel-data', $composer['require-dev']);
-        self::assertSame('^13.0', $composer['require']['laravel/framework']);
-        self::assertSame('^2.10', $composer['require-dev']['laravel/boost']);
-        self::assertSame(['@php artisan existing:workflow'], $composer['scripts']['post-update-cmd']);
-        self::assertFileExists($this->project.'/.ai/rules/laracanon-data.md');
-        self::assertFileExists($this->project.'/.ai/skills/laracanon-data/SKILL.md');
-        self::assertStringContainsString('Use package workflow instructions.', $this->read('.agents/skills/laravel-data-package/SKILL.md'));
-        self::assertFileDoesNotExist($this->project.'/.ai/skills/laravel-data-package/SKILL.md');
-        self::assertStringContainsString('General package advice remains available.', $this->read('AGENTS.md'));
-        $boost = json_decode($this->read('boost.json'), true);
-        self::assertContains('spatie/laravel-data', $boost['packages']);
-        self::assertSame(['keep' => true], $boost['custom']);
-        $rule = $this->read('.ai/rules/laracanon-data.md');
-        self::assertStringContainsString('fromRequest()', $rule);
-        self::assertStringContainsString('fromModel()', $rule);
-        self::assertStringContainsString('readonly', $rule);
-        self::assertStringContainsString("'name' => \$data->name", $rule);
-        self::assertStringContainsString("'phone_number' => \$data->phoneNumber", $rule);
-        self::assertStringContainsString('Data and Resources never query, write, or lazy-load.', $rule);
-        self::assertStringNotContainsString('## Examples', $rule);
-
-        $skill = $this->read('.ai/skills/laracanon-data/SKILL.md');
-        $agentSkill = $this->read('.agents/skills/laracanon-data/SKILL.md');
-        foreach (['CreateUserRequest', 'CreateUserData', 'CreateUser', 'CreateUserController'] as $exampleClass) {
-            $classDefinition = '/\bfinal class '.preg_quote($exampleClass, '/').'\b/';
-            self::assertDoesNotMatchRegularExpression($classDefinition, $rule, 'Implementation examples belong in the authored skill.');
-            self::assertMatchesRegularExpression($classDefinition, $skill);
-            self::assertMatchesRegularExpression($classDefinition, $agentSkill);
-        }
-        self::assertStringContainsString('canon:install data --dry-run', $skill);
-        self::assertStringContainsString("'phone_number' => \$data->phoneNumber", $skill);
-        self::assertStringNotContainsString('canon:install data --dry-run', $rule);
-        self::assertFileDoesNotExist($this->project.'/.ai/rules/laracanon-actions.md');
-    }
-
-    public function test_data_repeat_install_preserves_existing_dependency_constraint_and_version(): void
-    {
-        $this->simulateComposerInstall('^4.15', '4.21.0');
-        $manifest = $this->read('composer.json');
-        $lock = $this->read('composer.lock');
-        $first = $this->installer()->install($this->project, ['data']);
-        $rule = $this->read('.ai/rules/laracanon-data.md');
-        $skill = $this->read('.ai/skills/laracanon-data/SKILL.md');
-        $second = $this->installer()->install($this->project, ['data']);
-
-        self::assertTrue($first->successful(), implode("\n", $first->failures));
-        self::assertTrue($second->successful(), implode("\n", $second->failures));
-        self::assertSame([], $this->commands);
-        self::assertSame($manifest, $this->read('composer.json'));
-        self::assertSame($lock, $this->read('composer.lock'));
-        self::assertSame($rule, $this->read('.ai/rules/laracanon-data.md'));
-        self::assertSame($skill, $this->read('.ai/skills/laracanon-data/SKILL.md'));
+        return new ItemCatalog(dirname(__DIR__, 3).'/resources/agent-library');
     }
 
     public function test_package_only_installs_only_its_runtime_dependency_and_package_skill_and_repeats_without_changes(): void
@@ -745,102 +246,6 @@ NEON;
         self::assertFileDoesNotExist($this->project.'/.ai/rules/laracanon-data.md');
     }
 
-    public function test_actions_routes_implementation_to_its_authored_skill_without_installing_data(): void
-    {
-        $composer = $this->read('composer.json');
-        $report = $this->installer()->install($this->project, ['actions']);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertSame(['actions' => 'installed'], $report->items);
-        self::assertSame([], $this->commands);
-        self::assertSame($composer, $this->read('composer.json'));
-        self::assertCount(1, $report->rules);
-        self::assertCount(1, $report->skills);
-        $rule = $this->read('.ai/rules/laracanon-actions.md');
-        $skill = $this->read('.ai/skills/laracanon-actions/SKILL.md');
-        $agentSkill = $this->read('.agents/skills/laracanon-actions/SKILL.md');
-        $actionDefinition = '/\bfinal class CreateUser\b/';
-
-        self::assertDoesNotMatchRegularExpression($actionDefinition, $rule);
-        self::assertMatchesRegularExpression($actionDefinition, $skill);
-        self::assertMatchesRegularExpression($actionDefinition, $agentSkill);
-        self::assertMatchesRegularExpression('/^\d+\.\s/m', $skill, 'An authored implementation workflow accompanies the action example.');
-        self::assertStringContainsString('| app/Actions/** | .ai/rules/laracanon-actions.md |', $this->read('.ai/rules/index.md'));
-        self::assertFileDoesNotExist($this->project.'/.ai/rules/laracanon-data.md');
-        self::assertFileDoesNotExist($this->project.'/.ai/skills/laracanon-data/SKILL.md');
-    }
-
-    public function test_controllers_routes_web_and_api_examples_to_its_skill_without_dependencies(): void
-    {
-        $composer = $this->read('composer.json');
-        $report = $this->installer()->install($this->project, ['controllers']);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertSame(['controllers' => 'installed'], $report->items);
-        self::assertSame([], $this->commands);
-        self::assertSame($composer, $this->read('composer.json'));
-        self::assertCount(1, $report->rules);
-        self::assertCount(1, $report->skills);
-        $rule = $this->read('.ai/rules/laracanon-controllers.md');
-        $controllerDefinition = '/\bfinal class CreateUserController\b/';
-        self::assertDoesNotMatchRegularExpression($controllerDefinition, $rule);
-
-        foreach (['.ai/skills/laracanon-controllers/SKILL.md', '.agents/skills/laracanon-controllers/SKILL.md'] as $path) {
-            $skill = $this->read($path);
-            self::assertSame(2, preg_match_all($controllerDefinition, $skill), 'Both transport examples reach each installed skill copy.');
-            self::assertMatchesRegularExpression('/namespace\s+App\\\\Http\\\\Controllers\\\\Users\s*;/', $skill);
-            self::assertMatchesRegularExpression('/namespace\s+App\\\\Http\\\\Controllers\\\\(?:Api|API)\\\\[^;]+;/', $skill);
-            self::assertMatchesRegularExpression('/^\d+\.\s/m', $skill);
-        }
-
-        self::assertStringContainsString('| app/Http/Controllers/** | .ai/rules/laracanon-controllers.md |', $this->read('.ai/rules/index.md'));
-        self::assertFileDoesNotExist($this->project.'/.ai/rules/laracanon-actions.md');
-        self::assertFileDoesNotExist($this->project.'/.ai/rules/laracanon-data.md');
-        self::assertFileDoesNotExist($this->project.'/.ai/skills/laracanon-data/SKILL.md');
-    }
-
-    public function test_controllers_and_api_responses_install_separate_authored_skills_without_dependencies(): void
-    {
-        $composer = $this->read('composer.json');
-        $lock = $this->read('composer.lock');
-        $selected = ['controllers', 'api-responses'];
-        $report = $this->installer()->install($this->project, $selected);
-
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
-        self::assertSame(array_fill_keys($selected, 'installed'), $report->items);
-        self::assertSame([], $this->commands);
-        self::assertSame($composer, $this->read('composer.json'));
-        self::assertSame($lock, $this->read('composer.lock'));
-        self::assertCount(2, $report->rules);
-        self::assertCount(2, $report->skills);
-        $index = $this->read('.ai/rules/index.md');
-        $helperDefinition = '/\\b(?:final\\s+)?class ApiResponse\\b/';
-
-        foreach ($selected as $name) {
-            $path = '.ai/rules/laracanon-'.$name.'.md';
-            $rule = $this->read($path);
-            $rendered = RuleFrontmatter::parse($rule);
-            self::assertStringContainsString('| '.implode(', ', $rendered['paths']).' | '.$path.' |', $index);
-            self::assertDoesNotMatchRegularExpression($helperDefinition, $rule, 'The response helper implementation belongs in an authored skill.');
-            self::assertDoesNotMatchRegularExpression('/\\bfinal class CreateUserController\\b/', $rule);
-            $canonicalSkill = $this->read('.ai/skills/laracanon-'.$name.'/SKILL.md');
-            $agentSkill = $this->read('.agents/skills/laracanon-'.$name.'/SKILL.md');
-            self::assertMatchesRegularExpression('/^\\d+\\.\\s/m', $canonicalSkill);
-            self::assertStringContainsString($this->catalog()->all()[$name]->skill, $canonicalSkill);
-            self::assertStringContainsString($this->catalog()->all()[$name]->skill, $agentSkill);
-        }
-
-        self::assertMatchesRegularExpression($helperDefinition, $this->read('.ai/skills/laracanon-api-responses/SKILL.md'));
-        self::assertMatchesRegularExpression($helperDefinition, $this->read('.agents/skills/laracanon-api-responses/SKILL.md'));
-        self::assertFileDoesNotExist($this->project.'/.ai/rules/laracanon-data.md');
-        self::assertFileDoesNotExist($this->project.'/.ai/skills/laracanon-data/SKILL.md');
-    }
-
-    private function catalog(): ItemCatalog
-    {
-        return new ItemCatalog(dirname(__DIR__, 3).'/resources/items');
-    }
-
     private function fixtureCatalog(): ItemCatalog
     {
         return new ItemCatalog(dirname(__DIR__, 2).'/Fixtures/Items');
@@ -928,15 +333,9 @@ MARKDOWN);
         return new ProcessResult(0, 'Mocked compatible stable dependency installation.');
     }
 
-    /** @return list<string> */
     private function packageArguments(array $command): array
     {
         return array_values(array_filter(array_slice($command, 2), static fn (string $argument): bool => ! str_starts_with($argument, '--')));
-    }
-
-    private function simulateComposerInstall(string $constraint, string $version): void
-    {
-        $this->simulateDependencyInstall('spatie/laravel-data', 'runtime', $constraint, $version);
     }
 
     private function simulateDependencyInstall(string $package, string $type, string $constraint, string $version): void
@@ -950,47 +349,6 @@ MARKDOWN);
         $lock = json_decode($this->read('composer.lock'), true);
         $lock[$type === 'development' ? 'packages-dev' : 'packages'][] = ['name' => $package, 'version' => $version];
         $this->writeJson('composer.lock', $lock);
-    }
-
-    private function existingPhpstanConfiguration(): string
-    {
-        return <<<'NEON'
-# Project configuration: preserve this comment and its spacing.
-includes:
-    - vendor/larastan/larastan/extension.neon
-    - project-analysis.neon
-
-parameters:
-    # A comment mentioning level: 2 is not the setting.
-    level: 7 # Project analysis level.
-    paths:
-        - app/Domain
-        - app/Services
-    excludePaths:
-        analyse:
-            - app/Legacy/*
-    tmpDir: storage/phpstan-cache
-    reportUnmatchedIgnoredErrors: false
-
-NEON;
-    }
-
-    private function writeLegacyPhpstanState(string $contents): void
-    {
-        $this->write('phpstan.neon.dist', $contents);
-        $this->writeJson('.ai/laracanon/state.json', [
-            'schema' => 1,
-            'files' => [
-                'phpstan.neon.dist' => ['hash' => hash('sha256', $contents), 'owner' => 'phpstan'],
-            ],
-            'items' => [
-                'phpstan' => [
-                    'source_hash' => hash('sha256', 'Laracanon v0.1.0 phpstan item'),
-                    'files' => ['phpstan.neon.dist'],
-                    'status' => 'installed',
-                ],
-            ],
-        ]);
     }
 
     private function write(string $path, string $contents): void
@@ -1009,7 +367,6 @@ NEON;
         return (string) file_get_contents($this->project.'/'.$path);
     }
 
-    /** @return array<string, string> */
     private function snapshot(): array
     {
         $files = [];

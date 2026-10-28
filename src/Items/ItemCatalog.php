@@ -22,6 +22,10 @@ final class ItemCatalog
             throw new RuntimeException('Item directory does not exist: '.$this->directory.'.');
         }
 
+        if (is_file($this->directory.'/catalog.json')) {
+            return (new LibraryCatalog($this->directory))->all();
+        }
+
         $files = glob(rtrim($this->directory, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'*.md');
         if ($files === false) {
             throw new RuntimeException('Cannot read item directory: '.$this->directory.'.');

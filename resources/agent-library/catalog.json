@@ -1,0 +1,226 @@
+{
+  "schema": 1,
+  "source": "https://github.com/IsaacHatilima/skills",
+  "items": [
+    {
+      "name": "factory",
+      "description": "Start the factory workflow only when explicitly invoked as /factory in Claude Code or $factory in Codex with a feature request, approve command, or rework command.",
+      "files": {
+        ".ai/skills/factory/AGENT.md": "agents/factory/AGENT.md",
+        ".agents/skills/factory/AGENT.md": "agents/factory/AGENT.md",
+        ".claude/skills/factory/AGENT.md": "agents/factory/AGENT.md",
+        ".ai/skills/factory/agents/openai.yaml": "agents/factory/agents/openai.yaml",
+        ".agents/skills/factory/agents/openai.yaml": "agents/factory/agents/openai.yaml",
+        ".claude/skills/factory/agents/openai.yaml": "agents/factory/agents/openai.yaml",
+        ".ai/skills/factory/approver.md": "agents/factory/approver.md",
+        ".agents/skills/factory/approver.md": "agents/factory/approver.md",
+        ".claude/skills/factory/approver.md": "agents/factory/approver.md",
+        ".claude/agents/approver.md": "rendered/claude/approver.md",
+        ".codex/agents/approver.toml": "rendered/codex/approver.toml",
+        ".ai/skills/factory/builder.md": "agents/factory/builder.md",
+        ".agents/skills/factory/builder.md": "agents/factory/builder.md",
+        ".claude/skills/factory/builder.md": "agents/factory/builder.md",
+        ".claude/agents/builder.md": "rendered/claude/builder.md",
+        ".codex/agents/builder.toml": "rendered/codex/builder.toml",
+        ".ai/skills/factory/documenter.md": "agents/factory/documenter.md",
+        ".agents/skills/factory/documenter.md": "agents/factory/documenter.md",
+        ".claude/skills/factory/documenter.md": "agents/factory/documenter.md",
+        ".claude/agents/documenter.md": "rendered/claude/documenter.md",
+        ".codex/agents/documenter.toml": "rendered/codex/documenter.toml",
+        ".ai/skills/factory/README.md": "agents/factory/README.md",
+        ".agents/skills/factory/README.md": "agents/factory/README.md",
+        ".claude/skills/factory/README.md": "agents/factory/README.md",
+        ".ai/skills/factory/references/skills.md": "agents/factory/references/skills.md",
+        ".agents/skills/factory/references/skills.md": "agents/factory/references/skills.md",
+        ".claude/skills/factory/references/skills.md": "agents/factory/references/skills.md",
+        ".ai/skills/factory/reviewer-code.md": "agents/factory/reviewer-code.md",
+        ".agents/skills/factory/reviewer-code.md": "agents/factory/reviewer-code.md",
+        ".claude/skills/factory/reviewer-code.md": "agents/factory/reviewer-code.md",
+        ".claude/agents/reviewer-code.md": "rendered/claude/reviewer-code.md",
+        ".codex/agents/reviewer-code.toml": "rendered/codex/reviewer-code.toml",
+        ".ai/skills/factory/reviewer-security.md": "agents/factory/reviewer-security.md",
+        ".agents/skills/factory/reviewer-security.md": "agents/factory/reviewer-security.md",
+        ".claude/skills/factory/reviewer-security.md": "agents/factory/reviewer-security.md",
+        ".claude/agents/reviewer-security.md": "rendered/claude/reviewer-security.md",
+        ".codex/agents/reviewer-security.toml": "rendered/codex/reviewer-security.toml",
+        ".ai/skills/factory/reviewer-ui.md": "agents/factory/reviewer-ui.md",
+        ".agents/skills/factory/reviewer-ui.md": "agents/factory/reviewer-ui.md",
+        ".claude/skills/factory/reviewer-ui.md": "agents/factory/reviewer-ui.md",
+        ".claude/agents/reviewer-ui.md": "rendered/claude/reviewer-ui.md",
+        ".codex/agents/reviewer-ui.toml": "rendered/codex/reviewer-ui.toml",
+        ".ai/skills/factory/reviewer-ux.md": "agents/factory/reviewer-ux.md",
+        ".agents/skills/factory/reviewer-ux.md": "agents/factory/reviewer-ux.md",
+        ".claude/skills/factory/reviewer-ux.md": "agents/factory/reviewer-ux.md",
+        ".claude/agents/reviewer-ux.md": "rendered/claude/reviewer-ux.md",
+        ".codex/agents/reviewer-ux.toml": "rendered/codex/reviewer-ux.toml",
+        ".ai/skills/factory/SKILL.md": "agents/factory/SKILL.md",
+        ".agents/skills/factory/SKILL.md": "agents/factory/SKILL.md",
+        ".claude/skills/factory/SKILL.md": "agents/factory/SKILL.md",
+        ".ai/skills/factory/spec-writer.md": "agents/factory/spec-writer.md",
+        ".agents/skills/factory/spec-writer.md": "agents/factory/spec-writer.md",
+        ".claude/skills/factory/spec-writer.md": "agents/factory/spec-writer.md",
+        ".claude/agents/spec-writer.md": "rendered/claude/spec-writer.md",
+        ".codex/agents/spec-writer.toml": "rendered/codex/spec-writer.toml",
+        ".ai/skills/catalog.md": "skills/catalog.md",
+        ".agents/skills/catalog.md": "skills/catalog.md",
+        ".claude/skills/catalog.md": "skills/catalog.md"
+      }
+    },
+    {
+      "name": "laravel-actions",
+      "description": "Use when creating, refactoring, or reviewing a Laravel action or operation service that queries, writes, or makes a business decision.",
+      "files": {
+        ".ai/skills/laravel-actions/SKILL.md": "skills/laravel/actions/SKILL.md",
+        ".agents/skills/laravel-actions/SKILL.md": "skills/laravel/actions/SKILL.md",
+        ".claude/skills/laravel-actions/SKILL.md": "skills/laravel/actions/SKILL.md"
+      }
+    },
+    {
+      "name": "laravel-api-responses",
+      "description": "Use when adding or changing a Laravel JSON API endpoint, its response envelope or pagination output, or how API errors such as 401, 403, 404, 422, 429, and 500 are rendered.",
+      "files": {
+        ".ai/skills/laravel-api-responses/SKILL.md": "skills/laravel/api-responses/SKILL.md",
+        ".agents/skills/laravel-api-responses/SKILL.md": "skills/laravel/api-responses/SKILL.md",
+        ".claude/skills/laravel-api-responses/SKILL.md": "skills/laravel/api-responses/SKILL.md",
+        ".ai/skills/laravel-api-responses/templates/api-exceptions.php": "skills/laravel/api-responses/templates/api-exceptions.php",
+        ".agents/skills/laravel-api-responses/templates/api-exceptions.php": "skills/laravel/api-responses/templates/api-exceptions.php",
+        ".claude/skills/laravel-api-responses/templates/api-exceptions.php": "skills/laravel/api-responses/templates/api-exceptions.php",
+        ".ai/skills/laravel-api-responses/templates/ApiResponse.php": "skills/laravel/api-responses/templates/ApiResponse.php",
+        ".agents/skills/laravel-api-responses/templates/ApiResponse.php": "skills/laravel/api-responses/templates/ApiResponse.php",
+        ".claude/skills/laravel-api-responses/templates/ApiResponse.php": "skills/laravel/api-responses/templates/ApiResponse.php"
+      }
+    },
+    {
+      "name": "laravel-architecture",
+      "description": "Use when placing new Laravel behaviour, naming a new class, planning a feature or refactor, or reviewing where queries, validation, authorization, and responses belong.",
+      "files": {
+        ".ai/skills/laravel-architecture/SKILL.md": "skills/laravel/architecture/SKILL.md",
+        ".agents/skills/laravel-architecture/SKILL.md": "skills/laravel/architecture/SKILL.md",
+        ".claude/skills/laravel-architecture/SKILL.md": "skills/laravel/architecture/SKILL.md"
+      }
+    },
+    {
+      "name": "laravel-controllers",
+      "description": "Use when adding or changing Laravel controllers or routes, wiring a FormRequest and action to an endpoint, or choosing between an API response, Inertia page, and redirect.",
+      "files": {
+        ".ai/skills/laravel-controllers/SKILL.md": "skills/laravel/controllers/SKILL.md",
+        ".agents/skills/laravel-controllers/SKILL.md": "skills/laravel/controllers/SKILL.md",
+        ".claude/skills/laravel-controllers/SKILL.md": "skills/laravel/controllers/SKILL.md"
+      }
+    },
+    {
+      "name": "laravel-data",
+      "description": "Use when creating or changing Laravel input Data classes, output Resources, or the frontend-facing representation of a model, including partial updates.",
+      "files": {
+        ".ai/skills/laravel-data/SKILL.md": "skills/laravel/data/SKILL.md",
+        ".agents/skills/laravel-data/SKILL.md": "skills/laravel/data/SKILL.md",
+        ".claude/skills/laravel-data/SKILL.md": "skills/laravel/data/SKILL.md"
+      }
+    },
+    {
+      "name": "laravel-eloquent-strictness",
+      "description": "Use when enabling Eloquent strict mode, or when fixing a lazy-loading, missing-attribute, or discarded-attribute violation or an N+1 query.",
+      "files": {
+        ".ai/skills/laravel-eloquent-strictness/SKILL.md": "skills/laravel/eloquent-strictness/SKILL.md",
+        ".agents/skills/laravel-eloquent-strictness/SKILL.md": "skills/laravel/eloquent-strictness/SKILL.md",
+        ".claude/skills/laravel-eloquent-strictness/SKILL.md": "skills/laravel/eloquent-strictness/SKILL.md"
+      }
+    },
+    {
+      "name": "laravel-enums",
+      "description": "Use when adding or changing a PHP enum used by a Laravel model, or its stored values, labels, validation, or select options.",
+      "files": {
+        ".ai/skills/laravel-enums/SKILL.md": "skills/laravel/enums/SKILL.md",
+        ".agents/skills/laravel-enums/SKILL.md": "skills/laravel/enums/SKILL.md",
+        ".claude/skills/laravel-enums/SKILL.md": "skills/laravel/enums/SKILL.md"
+      }
+    },
+    {
+      "name": "laravel-frontend",
+      "description": "Use when adding or changing React or Inertia pages, page props, Wayfinder routes, forms, or shared UI in a Laravel application's resources/js.",
+      "files": {
+        ".ai/skills/laravel-frontend/SKILL.md": "skills/laravel/frontend/SKILL.md",
+        ".agents/skills/laravel-frontend/SKILL.md": "skills/laravel/frontend/SKILL.md",
+        ".claude/skills/laravel-frontend/SKILL.md": "skills/laravel/frontend/SKILL.md"
+      }
+    },
+    {
+      "name": "laravel-insights",
+      "description": "Use when adding, configuring, or running PHP Insights code-quality checks in a Laravel application, or when Insights reports a finding.",
+      "files": {
+        ".ai/skills/laravel-insights/insights.php": "skills/laravel/insights/insights.php",
+        ".agents/skills/laravel-insights/insights.php": "skills/laravel/insights/insights.php",
+        ".claude/skills/laravel-insights/insights.php": "skills/laravel/insights/insights.php",
+        ".ai/skills/laravel-insights/SKILL.md": "skills/laravel/insights/SKILL.md",
+        ".agents/skills/laravel-insights/SKILL.md": "skills/laravel/insights/SKILL.md",
+        ".claude/skills/laravel-insights/SKILL.md": "skills/laravel/insights/SKILL.md"
+      }
+    },
+    {
+      "name": "laravel-jobs",
+      "description": "Use when adding or reviewing Laravel queued jobs, listeners, or background work such as exports, reports, webhooks, imports, and notifications, or when a request is slow because it does work the user doesn't need to wait for.",
+      "files": {
+        ".ai/skills/laravel-jobs/SKILL.md": "skills/laravel/jobs/SKILL.md",
+        ".agents/skills/laravel-jobs/SKILL.md": "skills/laravel/jobs/SKILL.md",
+        ".claude/skills/laravel-jobs/SKILL.md": "skills/laravel/jobs/SKILL.md"
+      }
+    },
+    {
+      "name": "laravel-migrations",
+      "description": "Use when adding or changing a Laravel migration, table, column, index, foreign key, or schema backfill.",
+      "files": {
+        ".ai/skills/laravel-migrations/SKILL.md": "skills/laravel/migrations/SKILL.md",
+        ".agents/skills/laravel-migrations/SKILL.md": "skills/laravel/migrations/SKILL.md",
+        ".claude/skills/laravel-migrations/SKILL.md": "skills/laravel/migrations/SKILL.md"
+      }
+    },
+    {
+      "name": "laravel-models",
+      "description": "Use when creating or changing an Eloquent model, or its casts, relationships, scopes, fillable columns, or PHPDoc properties.",
+      "files": {
+        ".ai/skills/laravel-models/SKILL.md": "skills/laravel/models/SKILL.md",
+        ".agents/skills/laravel-models/SKILL.md": "skills/laravel/models/SKILL.md",
+        ".claude/skills/laravel-models/SKILL.md": "skills/laravel/models/SKILL.md"
+      }
+    },
+    {
+      "name": "laravel-phpstan",
+      "description": "Use when adding, configuring, or running PHPStan or Larastan static analysis in a Laravel application, or when PHPStan reports an error.",
+      "files": {
+        ".ai/skills/laravel-phpstan/phpstan.neon": "skills/laravel/phpstan/phpstan.neon",
+        ".agents/skills/laravel-phpstan/phpstan.neon": "skills/laravel/phpstan/phpstan.neon",
+        ".claude/skills/laravel-phpstan/phpstan.neon": "skills/laravel/phpstan/phpstan.neon",
+        ".ai/skills/laravel-phpstan/SKILL.md": "skills/laravel/phpstan/SKILL.md",
+        ".agents/skills/laravel-phpstan/SKILL.md": "skills/laravel/phpstan/SKILL.md",
+        ".claude/skills/laravel-phpstan/SKILL.md": "skills/laravel/phpstan/SKILL.md"
+      }
+    },
+    {
+      "name": "laravel-requests",
+      "description": "Use when adding or changing a Laravel FormRequest, validation rules, request authorization, or query parameters such as filters, sorting, and pagination.",
+      "files": {
+        ".ai/skills/laravel-requests/SKILL.md": "skills/laravel/requests/SKILL.md",
+        ".agents/skills/laravel-requests/SKILL.md": "skills/laravel/requests/SKILL.md",
+        ".claude/skills/laravel-requests/SKILL.md": "skills/laravel/requests/SKILL.md"
+      }
+    },
+    {
+      "name": "laravel-security",
+      "description": "Use when adding or reviewing Laravel authorization, policies, authentication, API tokens, CORS, CSRF exceptions, file uploads, raw queries, HTML output, rate limits, or production configuration, or before deploying a Laravel application.",
+      "files": {
+        ".ai/skills/laravel-security/SKILL.md": "skills/laravel/security/SKILL.md",
+        ".agents/skills/laravel-security/SKILL.md": "skills/laravel/security/SKILL.md",
+        ".claude/skills/laravel-security/SKILL.md": "skills/laravel/security/SKILL.md"
+      }
+    },
+    {
+      "name": "laravel-tests",
+      "description": "Use when writing, choosing, or running tests for a Laravel application, including Pest unit, feature, action, HTTP, and browser tests, or when deciding which tests a change needs.",
+      "files": {
+        ".ai/skills/laravel-tests/SKILL.md": "skills/laravel/tests/SKILL.md",
+        ".agents/skills/laravel-tests/SKILL.md": "skills/laravel/tests/SKILL.md",
+        ".claude/skills/laravel-tests/SKILL.md": "skills/laravel/tests/SKILL.md"
+      }
+    }
+  ]
+}

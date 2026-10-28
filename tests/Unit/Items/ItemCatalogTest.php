@@ -79,7 +79,7 @@ final class ItemCatalogTest extends TestCase
         self::assertNotNull($fixtures['fixture-authored-workflow']->skill);
         self::assertSame([], $fixtures['fixture-authored-workflow']->dependencies);
 
-        $production = (new ItemCatalog(dirname(__DIR__, 3).'/resources/items'))->all();
+        $production = (new ItemCatalog(dirname(__DIR__, 3).'/resources/agent-library'))->all();
         self::assertNotEmpty($production);
         foreach ($production as $name => $item) {
             self::assertFalse($item->sample);
