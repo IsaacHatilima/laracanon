@@ -13,6 +13,7 @@ final readonly class Item
      * @param  array<string, string>  $minimumVersions
      * @param  array<string, list<string>>  $composerPlugins
      * @param  array<string, array{candidates: list<string>, set: array<string, int|string|bool|float|null>}>  $neonUpdates
+     * @param  array<string, string>  $links
      */
     public function __construct(
         public string $name,
@@ -30,5 +31,6 @@ final readonly class Item
         public array $minimumVersions = [],
         public array $composerPlugins = [],
         public array $neonUpdates = [],
+        public array $links = [],
     ) {}
 }

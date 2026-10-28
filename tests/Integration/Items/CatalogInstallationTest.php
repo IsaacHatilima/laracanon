@@ -88,6 +88,80 @@ final class CatalogInstallationTest extends TestCase
         self::assertCount(8, glob($this->project.'/.codex/agents/*.toml'));
         self::assertStringContainsString('disable-model-invocation: true', $this->read('.agents/skills/factory/SKILL.md'));
         self::assertStringNotContainsString('| nest/', $this->read('.agents/skills/catalog.md'));
+        foreach (['.ai', '.claude'] as $host) {
+            self::assertTrue(is_link($this->project.'/'.$host.'/skills/laravel-actions'));
+            self::assertSame(realpath($this->project.'/.agents/skills/laravel-actions'), realpath($this->project.'/'.$host.'/skills/laravel-actions'));
+            self::assertTrue(is_link($this->project.'/'.$host.'/skills/factory'));
+        }
+        self::assertDirectoryDoesNotExist($this->project.'/.codex/skills');
+    }
+
+    private function installLegacyCopies(): void
+    {
+        $root = $this->project.'/legacy-library';
+        File::copyDirectory(dirname(__DIR__, 3).'/resources/agent-library', $root);
+        $catalog = json_decode((string) file_get_contents($root.'/catalog.json'), true);
+        $catalog['schema'] = 1;
+        foreach ($catalog['items'] as &$entry) {
+            unset($entry['links']);
+            foreach ($entry['files'] as $path => $source) {
+                if (str_starts_with($path, '.agents/skills/')) {
+                    foreach (['.ai', '.claude'] as $host) {
+                        $entry['files'][preg_replace('/^\\.agents/', $host, $path)] = $source;
+                    }
+                }
+            }
+        }
+        unset($entry);
+        file_put_contents($root.'/catalog.json', json_encode($catalog, JSON_THROW_ON_ERROR));
+        $report = $this->installer(new ItemCatalog($root))->install($this->project);
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+    }
+
+    public function test_upgrade_replaces_verified_copies_with_links_and_boost_refresh_keeps_them(): void
+    {
+        $this->installLegacyCopies();
+        self::assertFalse(is_link($this->project.'/.claude/skills/laravel-actions'));
+        $before = $this->snapshot();
+        $preview = $this->installer()->install($this->project, dryRun: true);
+        self::assertTrue($preview->successful(), implode("\n", array_merge($preview->failures, $preview->conflicts)));
+        self::assertSame($before, $this->snapshot());
+        $report = $this->installer()->install($this->project);
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        foreach (['.ai', '.claude'] as $host) {
+            self::assertTrue(is_link($this->project.'/'.$host.'/skills/laravel-actions'));
+            self::assertTrue(is_link($this->project.'/'.$host.'/skills/factory'));
+        }
+        $before = $this->snapshot();
+        $refresh = (new BoostProjectRefresher)->refresh();
+        self::assertSame([], $refresh['failures']);
+        self::assertSame([], $refresh['conflicts']);
+        self::assertSame($before, $this->snapshot());
+    }
+
+    public function test_upgrade_preserves_edited_legacy_copy_and_can_retry_after_reconciliation(): void
+    {
+        $this->installLegacyCopies();
+        $this->write('.claude/skills/laravel-actions/SKILL.md', 'My local instructions.');
+        $report = $this->installer()->install($this->project, ['laravel-actions']);
+        self::assertFalse($report->successful());
+        self::assertSame('My local instructions.', $this->read('.claude/skills/laravel-actions/SKILL.md'));
+        self::assertFalse(is_link($this->project.'/.claude/skills/laravel-actions'));
+        $this->write('.claude/skills/laravel-actions/SKILL.md', $this->read('.agents/skills/laravel-actions/SKILL.md'));
+        $report = $this->installer()->install($this->project, ['laravel-actions']);
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        self::assertTrue(is_link($this->project.'/.claude/skills/laravel-actions'));
+    }
+
+    public function test_unrelated_alias_symlink_is_refused_before_installing_files_or_dependencies(): void
+    {
+        File::ensureDirectoryExists($this->project.'/.claude/skills');
+        File::ensureDirectoryExists($this->project.'/outside');
+        symlink($this->project.'/outside', $this->project.'/.claude/skills/factory');
+        $report = $this->installer()->install($this->project, ['factory']);
+        self::assertFalse($report->successful());
+        self::assertSame([], $this->commands);
+        self::assertFileDoesNotExist($this->project.'/.agents/skills/factory/SKILL.md');
     }
 
     public function test_selected_skill_installs_support_files_without_modifying_project_configuration(): void
@@ -111,7 +185,9 @@ final class CatalogInstallationTest extends TestCase
         $installer = $this->installer();
         self::assertTrue($installer->install($this->project)->successful());
         $before = $this->snapshot();
+        $configuration = $this->read('boost.json');
         self::assertTrue($installer->install($this->project)->successful());
+        self::assertSame($configuration, $this->read('boost.json'));
         self::assertSame($before, $this->snapshot());
 
         $path = '.agents/skills/factory/AGENT.md';

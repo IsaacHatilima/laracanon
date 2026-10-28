@@ -288,6 +288,11 @@ final class ManagedFiles
         return $this->absolute('.ai/laracanon/install.lock');
     }
 
+    public function projectRoot(): string
+    {
+        return $this->root;
+    }
+
     public function save(): void
     {
         if (! $this->dryRun) {

@@ -160,6 +160,8 @@ class BoostProjectRefresher
             $skillNames = [];
             $agentSkillFiles = [];
             $previousOwnedSkillNames = [];
+            $sharedState = base_path('.ai/laracanon/state.json');
+            $sharedFiles = is_file($sharedState) ? (json_decode((string) file_get_contents($sharedState), true, flags: JSON_THROW_ON_ERROR)['files'] ?? []) : [];
 
             foreach ($agents as $agent) {
                 if ($agent instanceof SupportsSkills) {
@@ -170,9 +172,16 @@ class BoostProjectRefresher
             }
 
             foreach ($skills as $skill) {
-                $this->attempt(function () use ($skill, $agents, &$skillNames, &$agentSkillFiles): void {
+                $this->attempt(function () use ($skill, $agents, $sharedFiles, &$skillNames, &$agentSkillFiles): void {
                     if (! SkillWriter::isValidSkillName($skill->name)) {
                         throw new RuntimeException('Invalid dependency-provided skill name '.$skill->name);
+                    }
+                    if ($skill->custom && isset($sharedFiles['.agents/skills/'.$skill->name.'/SKILL.md'])) {
+                        $this->files->releaseSkill($skill->name);
+                        $skillNames[] = $skill->name;
+                        $this->report['resources'][] = 'Shared skill '.$skill->name.' uses its canonical files and native links';
+
+                        return;
                     }
 
                     $staged = $this->temporary.'/skills/'.$skill->name;
@@ -227,6 +236,8 @@ class BoostProjectRefresher
                 // A malformed or unrenderable source must not retire any skill.
                 $configuration['skills'] = array_values(array_unique(array_merge($configuration['skills'] ?? [], $skillNames)));
             }
+
+            sort($configuration['skills']);
 
             foreach ($agents as $agent) {
                 if ($agent instanceof SupportsMcp && ($configuration['mcp'] ?? false)) {

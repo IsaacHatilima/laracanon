@@ -89,6 +89,8 @@ final class Installer
             }
             $this->progress?->stage('Discovering package skills');
             $packageSkills = $this->boost->packageSkillNames($project);
+            $sharedLinks = new SharedSkillLinks($project, $dryRun);
+            $linkPlans = [];
 
             foreach ($items as $item) {
                 if ($item->skill === null && $item->skillName !== null && in_array($item->skillName, $packageSkills, true) && ! $item->overridesSkill) {
@@ -123,6 +125,7 @@ final class Installer
                 $managed = $previousFiles;
                 $desired = [];
                 $blockedSkills = [];
+                $retired = [];
                 try {
                     $this->progress?->stage(($dryRun ? 'Previewing item ' : 'Installing item ').$item->name);
                     if ($item->rules !== null) {
@@ -182,6 +185,7 @@ final class Installer
                             } else {
                                 $managed = array_values(array_diff($managed, [$previous]));
                                 if ($result === 'removed') {
+                                    $retired[] = $previous;
                                     $report->notes[] = "{$previous}: removed retired managed file.";
                                 } elseif ($result === 'released') {
                                     $report->notes[] = "{$previous}: retired adopted configuration preserved; managed settings released.";
@@ -191,6 +195,11 @@ final class Installer
                     }
                     $status = count($report->conflicts) > $conflictsBefore ? 'conflict' : ($dryRun ? 'planned' : 'installed');
                     $report->items[$item->name] = $status;
+                    if (count($report->conflicts) === $conflictsBefore && count($report->failures) === $failuresBefore) {
+                        foreach ($item->links as $alias => $target) {
+                            $linkPlans[] = [$item->name, $alias, $target, $retired];
+                        }
+                    }
                 } catch (Throwable $exception) {
                     $report->failures[] = "{$item->name}: {$exception->getMessage()}";
                     $report->items[$item->name] = 'partial failure';
@@ -204,6 +213,16 @@ final class Installer
             }
             $this->progress?->stage($dryRun ? 'Checking installation state' : 'Saving installation state');
             $files->save();
+            // Save retired-file ownership before replacing their directories with links.
+            foreach ($linkPlans as [$name, $alias, $target, $retired]) {
+                $result = $sharedLinks->install($alias, $target, $retired);
+                if ($result === 'conflict') {
+                    $report->conflicts[] = "{$alias}: locally modified or unowned skill copy preserved; reconcile it before linking to {$target}.";
+                    $report->items[$name] = 'conflict';
+                } else {
+                    $report->skills[] = "{$alias} -> {$target} ({$result})";
+                }
+            }
 
             if ($dryRun || in_array('laravel/boost', $available, true)) {
                 $this->progress?->stage($dryRun ? 'Previewing Laravel Boost rules and skills' : 'Refreshing Laravel Boost rules and skills');
@@ -319,6 +338,9 @@ final class Installer
         $selectedOwners = [];
         $resolvedPaths = [];
         foreach ($items as $item) {
+            foreach ($item->links as $alias => $target) {
+                (new SharedSkillLinks($files->projectRoot(), true))->validate($alias, $target);
+            }
             $paths = [];
             if ($item->rules !== null) {
                 $paths[] = '.ai/rules/laracanon-'.$item->name.'.md';

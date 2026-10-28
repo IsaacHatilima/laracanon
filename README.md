@@ -37,7 +37,8 @@ Invoke `/factory <feature request>` in Claude Code or `$factory <feature request
 
 | Location | Content |
 |---|---|
-| `.ai/skills/`, `.agents/skills/`, `.claude/skills/` | Group-prefixed Laravel skills, the factory command and its complete bundle, and a catalog of available skills. |
+| `.agents/skills/` | One shared copy of the group-prefixed Laravel skills, factory bundle, and catalog. Codex reads this directory directly. |
+| `.ai/skills/`, `.claude/skills/` | Relative links to the shared skills for Laravel Boost and Claude Code. |
 | `.claude/agents/` | Eight factory child agents rendered for Claude Code. |
 | `.codex/agents/` | The same factory roles rendered for Codex. |
 | `.ai/laracanon/state.json` | Managed-file ownership and hashes. |
@@ -45,6 +46,8 @@ Invoke `/factory <feature request>` in Claude Code or `$factory <feature request
 Skill support files, such as Insights/PHPStan configurations and API response templates, stay beside their skill instructions. Installing a skill does not apply those templates to the application or install its suggested packages. Laravel Boost integration can install Boost if missing and refresh its resources; see [the integration details](docs/boost-integration.md).
 
 Dry runs write no files and run no processes. Repeat installs update unchanged managed files, preserve local edits, and report conflicts. Unrelated files and existing Composer constraints are preserved. Files owned by a previous version of the same selected item are retired only when they remain unchanged.
+
+Upgrading from the previous three-copy layout replaces verified managed copies with relative links. A changed or unowned copy is preserved and reported as a conflict. Reconcile that copy before retrying. Symlinks must be supported; the installer reports an error instead of silently making duplicate copies. `.codex/skills/` is unnecessary: Codex's project skill directory is `.agents/skills/`.
 
 Older catalogs used names such as `actions` and `laracanon-actions`. The shared catalog uses `laravel-actions`; list the available names with `canon:list`. Existing installed guidance is preserved by the ownership checks. Review obsolete legacy guidance before removing it from an application.
 
