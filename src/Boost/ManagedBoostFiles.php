@@ -131,6 +131,18 @@ class ManagedBoostFiles
         $this->put($path, $contents);
     }
 
+    /** The shared library owns these files; Boost must not rewrite or retire them. */
+    public function releaseSkill(string $name): void
+    {
+        foreach (array_keys($this->hashes) as $path) {
+            foreach (['.agents/skills/', '.claude/skills/'] as $prefix) {
+                if (str_starts_with($path, $prefix.$name.'/')) {
+                    unset($this->hashes[$path]);
+                }
+            }
+        }
+    }
+
     /** @return list<string> */
     public function ownedSkillNames(string $prefix): array
     {

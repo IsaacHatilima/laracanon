@@ -9,14 +9,16 @@ use RuntimeException;
 /** Reads the generated delivery from IsaacHatilima/skills. */
 final readonly class LibraryCatalog
 {
+    public const LIBRARY_SCHEMA = 2;
+
     public function __construct(private string $directory) {}
 
     /** @return array<string, Item> */
     public function all(): array
     {
         $catalog = json_decode($this->read('catalog.json'), true, flags: JSON_THROW_ON_ERROR);
-        if (! is_array($catalog) || ($catalog['schema'] ?? null) !== 1 || ! is_array($catalog['items'] ?? null) || ! array_is_list($catalog['items']) || $catalog['items'] === []) {
-            throw new RuntimeException('Invalid agent-library catalog: expected schema 1 and nonempty items.');
+        if (! is_array($catalog) || ! in_array($catalog['schema'] ?? null, [1, self::LIBRARY_SCHEMA], true) || ! is_array($catalog['items'] ?? null) || ! array_is_list($catalog['items']) || $catalog['items'] === []) {
+            throw new RuntimeException('Invalid agent-library catalog: expected supported schema and nonempty items.');
         }
 
         $items = [];
@@ -48,6 +50,22 @@ final readonly class LibraryCatalog
                 $destinations[$destination] = $name;
                 $files[$destination] = $this->read($source);
             }
+            $links = $entry['links'] ?? [];
+            if (! is_array($links) || ($links !== [] && array_is_list($links))) {
+                throw new RuntimeException('Invalid library links.');
+            }
+            foreach ($links as $alias => $target) {
+                $leaf = is_string($alias) ? basename($alias) : '';
+                if (! is_string($alias) || ! preg_match('#^\.(?:ai|claude)/skills/[a-z0-9.-]+$#D', $alias)
+                    || ! is_string($target) || $target !== '.agents/skills/'.$leaf || ! in_array($leaf, [$name, 'catalog.md'], true)
+                    || array_filter(array_keys($files), fn (string $file): bool => $file === $target || str_starts_with($file, $target.'/')) === []) {
+                    throw new RuntimeException('Unsafe library link.');
+                }
+                if (isset($destinations[$alias])) {
+                    throw new RuntimeException('Duplicate library destination: '.$alias.'.');
+                }
+                $destinations[$alias] = $name;
+            }
 
             $items[$name] = new Item(
                 name: $name,
@@ -58,8 +76,9 @@ final readonly class LibraryCatalog
                 examples: null,
                 skill: null,
                 skillName: $name,
-                sourceHash: hash('sha256', json_encode($files, JSON_THROW_ON_ERROR)),
+                sourceHash: hash('sha256', json_encode([$files, $links], JSON_THROW_ON_ERROR)),
                 files: $files,
+                links: $links,
             );
         }
 

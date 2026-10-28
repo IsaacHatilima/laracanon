@@ -62,6 +62,22 @@ final class LibraryCatalogTest extends TestCase
         (new ItemCatalog($this->directory))->all();
     }
 
+    public function test_links_must_point_to_the_same_items_shared_files(): void
+    {
+        $this->catalog(['.agents/skills/laravel-actions/SKILL.md' => 'source.md']);
+        $path = $this->directory.'/catalog.json';
+        $catalog = json_decode((string) file_get_contents($path), true);
+        $catalog['schema'] = 2;
+        $catalog['items'][0]['links'] = ['.claude/skills/laravel-actions' => '.agents/skills/laravel-actions'];
+        file_put_contents($path, json_encode($catalog, JSON_THROW_ON_ERROR));
+        self::assertSame($catalog['items'][0]['links'], (new ItemCatalog($this->directory))->find('laravel-actions')->links);
+        $catalog['items'][0]['links']['.claude/skills/laravel-actions'] = '../outside';
+        file_put_contents($path, json_encode($catalog, JSON_THROW_ON_ERROR));
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Unsafe library link');
+        (new ItemCatalog($this->directory))->all();
+    }
+
     /** @param array<string, string> $files */
     private function catalog(array $files): void
     {
