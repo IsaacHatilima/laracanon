@@ -302,7 +302,7 @@ final class ManagedFiles
     private function absolute(string $relative): string
     {
         $segments = explode('/', $relative);
-        $aiPath = preg_match('#^\.ai/[a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)*$#D', $relative) === 1
+        $aiPath = preg_match('#^(?:\.ai/[a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)*|\.(?:agents|claude)/skills/[a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)*|\.(?:claude|codex)/agents/[a-zA-Z0-9_-]+\.(?:md|toml))$#D', $relative) === 1
             && ! in_array('.', $segments, true) && ! in_array('..', $segments, true);
         if (! $aiPath && ! ItemFilePath::isConfiguration($relative)) {
             throw new RuntimeException("Unsafe managed path {$relative}.");

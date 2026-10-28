@@ -32,20 +32,9 @@ final class ApiResponseExampleTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $source = file_get_contents(dirname(__DIR__, 3).'/resources/items/api-responses.md');
-        preg_match_all('/```php\n(.*?)```/s', $source, $matches);
-        $helper = null;
-        $configuration = null;
-
-        foreach ($matches[1] as $code) {
-            if (str_contains($code, 'final class ApiResponse')) {
-                $helper = $code;
-            }
-
-            if (str_contains($code, 'return static function (Exceptions $exceptions)')) {
-                $configuration = $code;
-            }
-        }
+        $templates = dirname(__DIR__, 3).'/resources/agent-library/skills/laravel/api-responses/templates';
+        $helper = file_get_contents($templates.'/ApiResponse.php');
+        $configuration = file_get_contents($templates.'/api-exceptions.php');
 
         self::assertNotNull($helper, 'Test the exact authored application helper.');
         self::assertNotNull($configuration, 'Test the exact authored exception callback.');

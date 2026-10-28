@@ -91,6 +91,12 @@ final class Installer
             $packageSkills = $this->boost->packageSkillNames($project);
 
             foreach ($items as $item) {
+                if ($item->skill === null && $item->skillName !== null && in_array($item->skillName, $packageSkills, true) && ! $item->overridesSkill) {
+                    $report->conflicts[] = "{$item->skillName}: package-provided skill preserved; the shared library item was not installed.";
+                    $report->items[$item->name] = 'conflict';
+
+                    continue;
+                }
                 $missing = array_filter($item->dependencies, fn ($dependency) => ! in_array($dependency->package, $available, true));
                 if (! $dryRun && $missing !== []) {
                     $report->items[$item->name] = 'failed dependencies';
@@ -148,7 +154,7 @@ final class Installer
                         }
                         $written = $existing
                             ? $this->writeNeon($files, $path, $policy['set'], $item->name, $report)
-                            : $this->write($files, $path, $contents, $item->name, 'files', $report);
+                            : $this->write($files, $path, $contents, $item->name, str_contains($path, '/skills/') || str_contains($path, '/agents/') ? 'skills' : 'files', $report);
                         if ($written) {
                             $managed[] = $path;
                         } elseif ($policy !== null) {

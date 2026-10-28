@@ -19,7 +19,7 @@ final class LaracanonServiceProvider extends ServiceProvider
         $this->app->singleton(InstallationProgress::class);
         $this->app->bind(ProcessRunner::class, SymfonyProcessRunner::class);
         $this->app->bind(ItemCatalog::class, fn ($app) => new ItemCatalog(
-            $app['config']->get('laracanon.items_path') ?? dirname(__DIR__).'/resources/items'
+            $app['config']->get('laracanon.items_path') ?? dirname(__DIR__).'/resources/agent-library'
         ));
     }
 
