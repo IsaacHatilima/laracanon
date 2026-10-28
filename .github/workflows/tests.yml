@@ -2,6 +2,9 @@ name: Tests
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   tests:
     runs-on: ubuntu-latest
@@ -34,6 +37,7 @@ jobs:
         if: startsWith(matrix.laravel, '^11.')
         run: |
           composer config --json policy.advisories.ignore-id '{
+            "PKSA-b41t-wbzk-9q51": {"on-block": true, "on-audit": false, "reason": "CI-only Laravel 11 compatibility fixture; no public HTTP service. GHSA-f9x3-7vq9-cph6 has no Laravel 11 patch."},
             "PKSA-d5tc-s1qs-h781": {"on-block": true, "on-audit": false, "reason": "CI-only Laravel 11 compatibility test; security support ended 2026-03-12."},
             "PKSA-m5cs-t1y6-qpcs": {"on-block": true, "on-audit": false, "reason": "CI-only Laravel 11 compatibility test; security support ended 2026-03-12."},
             "PKSA-3r5d-mb8f-1qw9": {"on-block": true, "on-audit": false, "reason": "CI-only Laravel 11 compatibility test; security support ended 2026-03-12."},
@@ -44,3 +48,12 @@ jobs:
           COMPOSER_NO_AUDIT: '0'
         run: composer require --dev "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" "phpunit/phpunit:${{ matrix.phpunit }}" --no-interaction --no-progress
       - run: composer check
+
+  release-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - run: node --test scripts/release.test.mjs

@@ -52,7 +52,7 @@ Older catalogs used names such as `actions` and `laracanon-actions`. The shared 
 
 The generated snapshot lives in [resources/agent-library](resources/agent-library). It contains factory and only `skills/laravel` from the source repository. The old authored `resources/items` catalog has been removed.
 
-Make skill and factory changes in **IsaacHatilima/skills**. Its main-branch delivery workflow opens or updates a PR here; merged changes ship through the normal Composer release process. Do not edit generated content here.
+Make skill and factory changes in **IsaacHatilima/skills**. Its main-branch delivery workflow opens or updates a PR here; each changed delivery includes an automatic patch bump in `VERSION`. After merge, the complete `Tests` workflow must pass for the current `main` commit. The release workflow then pushes its `vX.Y.Z` tag and creates a GitHub release; the configured Packagist auto-update hook indexes it. Composer reads the version from the tag. Do not edit generated content here.
 
 A project-specific Markdown catalog remains supported through `laracanon.items_path`. Those items retain the existing rules, dependencies, configuration, and authored-skill format; package tests use isolated fixtures for that interface.
 
@@ -65,3 +65,7 @@ vendor/bin/pint --test src tests
 ```
 
 Use focused tests for the paths and flows you change.
+
+The initial shared-library release is `0.1.3`. New subscribed skill updates bump that version automatically in the sync PR; no manual version edit or tagging is needed. Failed tests prevent publication. Rerunning the successful main-branch Tests workflow can retry a release after a transient failure.
+
+Laravel 11 compatibility tests use an explicit CI-only advisory allowlist because that framework line is outside security support. Advisory reporting stays enabled; the allowlist is created only in the isolated compatibility job and is not part of an application's Composer configuration.
