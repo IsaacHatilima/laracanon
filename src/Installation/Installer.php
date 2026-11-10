@@ -94,7 +94,7 @@ final class Installer
 
             foreach ($items as $item) {
                 if ($item->skill === null && $item->skillName !== null && in_array($item->skillName, $packageSkills, true) && ! $item->overridesSkill) {
-                    $report->conflicts[] = "{$item->skillName}: package-provided skill preserved; the shared library item was not installed.";
+                    $report->conflicts[] = "{$item->skillName}: package-provided skill preserved; the Laracanon skill was not installed.";
                     $report->items[$item->name] = 'conflict';
 
                     continue;

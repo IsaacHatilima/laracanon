@@ -13,7 +13,7 @@ final readonly class SharedSkillLinks
 
     public function validate(string $alias, string $target): void
     {
-        if (! preg_match('#^\.(?:ai|claude)/skills/(?:[a-z0-9]+(?:-[a-z0-9]+)*|catalog\.md)$#D', $alias) || $target !== '.agents/skills/'.basename($alias)) {
+        if (! preg_match('#^\.(?:ai|claude)/skills/[a-z0-9]+(?:-[a-z0-9]+)*$#D', $alias) || $target !== '.agents/skills/'.basename($alias)) {
             throw new RuntimeException('Unsafe shared skill link: '.$alias.'.');
         }
         foreach ([dirname($alias), $target] as $relative) {
