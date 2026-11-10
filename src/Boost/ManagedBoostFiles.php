@@ -131,7 +131,7 @@ class ManagedBoostFiles
         $this->put($path, $contents);
     }
 
-    /** The shared library owns these files; Boost must not rewrite or retire them. */
+    /** Laracanon's installed skill owns these files; Boost must not rewrite or retire them. */
     public function releaseSkill(string $name): void
     {
         foreach (array_keys($this->hashes) as $path) {

@@ -22,8 +22,8 @@ final class ItemCatalog
             throw new RuntimeException('Item directory does not exist: '.$this->directory.'.');
         }
 
-        if (is_file($this->directory.'/catalog.json')) {
-            return (new LibraryCatalog($this->directory))->all();
+        if (SkillCatalog::supports($this->directory)) {
+            return (new SkillCatalog($this->directory))->all();
         }
 
         $files = glob(rtrim($this->directory, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'*.md');

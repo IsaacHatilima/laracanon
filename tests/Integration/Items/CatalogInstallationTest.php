@@ -65,10 +65,10 @@ final class CatalogInstallationTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_shared_catalog_installs_factory_and_laravel_skills_with_native_agents(): void
+    public function test_bundled_catalog_installs_only_the_laravel_skills(): void
     {
         $items = $this->catalog()->all();
-        self::assertArrayHasKey('factory', $items);
+        self::assertArrayNotHasKey('factory', $items);
         self::assertArrayHasKey('laravel-actions', $items);
         self::assertArrayNotHasKey('plans', $items);
         $composer = $this->read('composer.json');
@@ -79,43 +79,84 @@ final class CatalogInstallationTest extends TestCase
         self::assertSame([], $this->commands);
         self::assertCount(count($items), $report->items);
         foreach ($items as $item) {
-            self::assertTrue($item->name === 'factory' || str_starts_with($item->name, 'laravel-'));
+            self::assertStringStartsWith('laravel-', $item->name);
             foreach ($item->files as $path => $contents) {
                 self::assertSame($contents, $this->read($path), $path);
             }
         }
-        self::assertCount(8, glob($this->project.'/.claude/agents/*.md'));
-        self::assertCount(8, glob($this->project.'/.codex/agents/*.toml'));
-        self::assertStringContainsString('disable-model-invocation: true', $this->read('.agents/skills/factory/SKILL.md'));
-        self::assertStringNotContainsString('| nest/', $this->read('.agents/skills/catalog.md'));
         foreach (['.ai', '.claude'] as $host) {
             self::assertTrue(is_link($this->project.'/'.$host.'/skills/laravel-actions'));
             self::assertSame(realpath($this->project.'/.agents/skills/laravel-actions'), realpath($this->project.'/'.$host.'/skills/laravel-actions'));
-            self::assertTrue(is_link($this->project.'/'.$host.'/skills/factory'));
         }
+        self::assertDirectoryDoesNotExist($this->project.'/.claude/agents');
+        self::assertDirectoryDoesNotExist($this->project.'/.codex/agents');
         self::assertDirectoryDoesNotExist($this->project.'/.codex/skills');
+        self::assertFileDoesNotExist($this->project.'/.agents/skills/catalog.md');
+        self::assertDirectoryDoesNotExist($this->project.'/.agents/skills/factory');
     }
 
+    public function test_upgrading_leaves_files_from_the_retired_factory_item_in_place(): void
+    {
+        $factory = [
+            '.agents/skills/factory/SKILL.md' => "---\nname: factory\ndescription: Earlier factory.\n---\n",
+            '.agents/skills/catalog.md' => "# Installed skill catalog\n",
+            '.claude/agents/builder.md' => "---\nname: builder\n---\n",
+            '.codex/agents/builder.toml' => "name = \"builder\"\n",
+        ];
+        $state = ['schema' => 2, 'files' => [], 'items' => ['factory' => ['source_hash' => hash('sha256', 'factory'), 'files' => array_keys($factory), 'status' => 'installed']]];
+        foreach ($factory as $path => $contents) {
+            $this->write($path, $contents);
+            $state['files'][$path] = ['hash' => hash('sha256', $contents), 'owner' => 'factory'];
+        }
+        $this->writeJson('.ai/laracanon/state.json', $state);
+
+        $report = $this->installer()->install($this->project);
+
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        self::assertArrayNotHasKey('factory', $report->items);
+        foreach ($factory as $path => $contents) {
+            self::assertSame($contents, $this->read($path), $path);
+        }
+        self::assertTrue(is_link($this->project.'/.claude/skills/laravel-actions'));
+    }
+
+    public function test_every_bundled_skill_file_is_installed(): void
+    {
+        $root = dirname(__DIR__, 3).'/resources/skills';
+        $expected = [];
+        foreach (File::allFiles($root, true) as $file) {
+            if (! str_starts_with($file->getFilename(), '.')) {
+                $expected[] = '.agents/skills/'.str_replace(DIRECTORY_SEPARATOR, '/', $file->getRelativePathname());
+            }
+        }
+        $installable = [];
+        foreach ($this->catalog()->all() as $item) {
+            array_push($installable, ...array_keys($item->files));
+        }
+        sort($expected);
+        sort($installable);
+        self::assertSame($expected, $installable);
+    }
+
+    /** Recreates the layout earlier releases wrote: real copies in .ai and .claude, owned in state.json. */
     private function installLegacyCopies(): void
     {
-        $root = $this->project.'/legacy-library';
-        File::copyDirectory(dirname(__DIR__, 3).'/resources/agent-library', $root);
-        $catalog = json_decode((string) file_get_contents($root.'/catalog.json'), true);
-        $catalog['schema'] = 1;
-        foreach ($catalog['items'] as &$entry) {
-            unset($entry['links']);
-            foreach ($entry['files'] as $path => $source) {
-                if (str_starts_with($path, '.agents/skills/')) {
-                    foreach (['.ai', '.claude'] as $host) {
-                        $entry['files'][preg_replace('/^\\.agents/', $host, $path)] = $source;
-                    }
+        $report = $this->installer()->install($this->project);
+        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        $statePath = $this->project.'/.ai/laracanon/state.json';
+        $state = json_decode((string) file_get_contents($statePath), true, flags: JSON_THROW_ON_ERROR);
+        foreach ($this->catalog()->all() as $item) {
+            foreach ($item->links as $alias => $target) {
+                unlink($this->project.'/'.$alias);
+                foreach ($item->files as $path => $contents) {
+                    $copy = $alias.substr($path, strlen($target));
+                    $this->write($copy, $contents);
+                    $state['files'][$copy] = ['hash' => hash('sha256', $contents), 'owner' => $item->name];
+                    $state['items'][$item->name]['files'][] = $copy;
                 }
             }
         }
-        unset($entry);
-        file_put_contents($root.'/catalog.json', json_encode($catalog, JSON_THROW_ON_ERROR));
-        $report = $this->installer(new ItemCatalog($root))->install($this->project);
-        self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
+        file_put_contents($statePath, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n");
     }
 
     public function test_upgrade_replaces_verified_copies_with_links_and_boost_refresh_keeps_them(): void
@@ -130,7 +171,7 @@ final class CatalogInstallationTest extends TestCase
         self::assertTrue($report->successful(), implode("\n", array_merge($report->failures, $report->conflicts)));
         foreach (['.ai', '.claude'] as $host) {
             self::assertTrue(is_link($this->project.'/'.$host.'/skills/laravel-actions'));
-            self::assertTrue(is_link($this->project.'/'.$host.'/skills/factory'));
+            self::assertTrue(is_link($this->project.'/'.$host.'/skills/laravel-api-responses'));
         }
         $before = $this->snapshot();
         $refresh = (new BoostProjectRefresher)->refresh();
@@ -157,11 +198,11 @@ final class CatalogInstallationTest extends TestCase
     {
         File::ensureDirectoryExists($this->project.'/.claude/skills');
         File::ensureDirectoryExists($this->project.'/outside');
-        symlink($this->project.'/outside', $this->project.'/.claude/skills/factory');
-        $report = $this->installer()->install($this->project, ['factory']);
+        symlink($this->project.'/outside', $this->project.'/.claude/skills/laravel-actions');
+        $report = $this->installer()->install($this->project, ['laravel-actions']);
         self::assertFalse($report->successful());
         self::assertSame([], $this->commands);
-        self::assertFileDoesNotExist($this->project.'/.agents/skills/factory/SKILL.md');
+        self::assertFileDoesNotExist($this->project.'/.agents/skills/laravel-actions/SKILL.md');
     }
 
     public function test_selected_skill_installs_support_files_without_modifying_project_configuration(): void
@@ -177,7 +218,7 @@ final class CatalogInstallationTest extends TestCase
         self::assertFileExists($this->project.'/.agents/skills/laravel-insights/insights.php');
         self::assertFileExists($this->project.'/.agents/skills/laravel-phpstan/phpstan.neon');
         self::assertFileExists($this->project.'/.agents/skills/laravel-api-responses/templates/ApiResponse.php');
-        self::assertFileDoesNotExist($this->project.'/.agents/skills/factory/SKILL.md');
+        self::assertFileDoesNotExist($this->project.'/.agents/skills/laravel-actions/SKILL.md');
     }
 
     public function test_repeat_install_is_idempotent_and_preserves_a_locally_edited_native_skill(): void
@@ -190,12 +231,12 @@ final class CatalogInstallationTest extends TestCase
         self::assertSame($configuration, $this->read('boost.json'));
         self::assertSame($before, $this->snapshot());
 
-        $path = '.agents/skills/factory/AGENT.md';
-        $this->write($path, 'Local workflow changes.');
-        $report = $installer->install($this->project, ['factory']);
+        $path = '.agents/skills/laravel-actions/SKILL.md';
+        $this->write($path, 'Local skill changes.');
+        $report = $installer->install($this->project, ['laravel-actions']);
         self::assertFalse($report->successful());
         self::assertNotEmpty($report->conflicts);
-        self::assertSame('Local workflow changes.', $this->read($path));
+        self::assertSame('Local skill changes.', $this->read($path));
     }
 
     public function test_shared_catalog_dry_run_has_no_file_or_process_side_effects(): void
@@ -223,7 +264,7 @@ final class CatalogInstallationTest extends TestCase
 
     private function catalog(): ItemCatalog
     {
-        return new ItemCatalog(dirname(__DIR__, 3).'/resources/agent-library');
+        return new ItemCatalog(dirname(__DIR__, 3).'/resources/skills');
     }
 
     public function test_package_only_installs_only_its_runtime_dependency_and_package_skill_and_repeats_without_changes(): void

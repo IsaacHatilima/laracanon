@@ -32,7 +32,7 @@ final class ApiResponseExampleTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $templates = dirname(__DIR__, 3).'/resources/agent-library/skills/laravel/api-responses/templates';
+        $templates = dirname(__DIR__, 3).'/resources/skills/laravel-api-responses/templates';
         $helper = file_get_contents($templates.'/ApiResponse.php');
         $configuration = file_get_contents($templates.'/api-exceptions.php');
 
